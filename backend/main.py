@@ -129,7 +129,7 @@ async def report_incident(report: IncidentReport):
         transcript=transcript,
         confidence=analysis["confidence"],
         status="active",
-        timestamp=datetime.utcnow().isoformat(),
+        timestamp=datetime.utcnow().isoformat() + "Z",
         language=report.language,
     )
 
@@ -191,7 +191,7 @@ async def get_analytics(department: Optional[str] = None):
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat() + "Z"}
 
 
 # ─── WebSocket: Real-time Voice Transcription ───

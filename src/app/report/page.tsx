@@ -86,7 +86,8 @@ export default function ReportPage() {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        () => setCoords({ lat: 26.4499, lng: 80.3319 }) // Fallback to Kanpur
+        () => setCoords({ lat: 26.5106, lng: 80.2334 }), // Fallback to Kanpur
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
     }
   }, []);
