@@ -44,9 +44,7 @@ const AGENCY_LABELS: Record<string, string> = {
 };
 
 // Main app nav links
-const mainNavLinks = [
-  { href: "/", label: "Home & Report", icon: Mic },
-];
+const mainNavLinks: { href: string; label: string; icon: React.ElementType }[] = [];
 
 // Agencies portal nav links
 const agencyNavLinks = [

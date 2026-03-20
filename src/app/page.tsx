@@ -1,7 +1,6 @@
 "use client";
 
 import React from "react";
-import Link from "next/link";
 import { motion, useScroll, useTransform } from "framer-motion";
 import {
   Mic,
@@ -172,12 +171,7 @@ export default function HomePage() {
                   </motion.span>
                 </a>
               </MagneticHover>
-              <MagneticHover strength={0.2}>
-                <Link href="/dashboard" className="btn-secondary">
-                  <Shield size={18} />
-                  View Dashboard
-                </Link>
-              </MagneticHover>
+
             </motion.div>
           </motion.div>
 
