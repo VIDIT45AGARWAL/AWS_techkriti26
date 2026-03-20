@@ -1,0 +1,224 @@
+.navbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  padding: 16px 0;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.navbar.scrolled {
+  background: rgba(10, 14, 26, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 10px 0;
+}
+
+.inner {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Logo */
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-heading);
+  font-size: 1.4rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.logoIcon {
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--gradient-red);
+  border-radius: 10px;
+  color: white;
+  box-shadow: 0 4px 16px var(--accent-red-glow);
+}
+
+.logoText {
+  color: var(--text-primary);
+}
+
+.logoAccent {
+  color: var(--accent-red);
+}
+
+/* Desktop Links */
+.desktopLinks {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.navLink {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-radius: var(--radius-full);
+  transition: all 0.25s ease;
+}
+
+.navLink:hover {
+  color: var(--text-primary);
+  background: var(--bg-glass);
+}
+
+.navLink.active {
+  color: var(--text-primary);
+}
+
+.activeBar {
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 20px;
+  height: 3px;
+  background: var(--accent-red);
+  border-radius: 2px;
+}
+
+/* Emergency CTA */
+.emergencyCta {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px;
+  background: var(--gradient-red);
+  color: white;
+  font-weight: 600;
+  font-size: 0.875rem;
+  border-radius: var(--radius-full);
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 20px var(--accent-red-glow);
+  overflow: hidden;
+}
+
+.emergencyCta:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 30px var(--accent-red-glow);
+}
+
+.ctaPulse {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-full);
+  border: 2px solid var(--accent-red);
+  animation: pulse-ring 2s ease-out infinite;
+  pointer-events: none;
+}
+
+/* Mobile */
+.mobileToggle {
+  display: none;
+  color: var(--text-primary);
+}
+
+.mobileMenu {
+  display: none;
+  overflow: hidden;
+}
+
+.mobileLink {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 24px;
+  color: var(--text-secondary);
+  font-size: 1rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.mobileLink:hover,
+.mobileLink.active {
+  color: var(--text-primary);
+  background: var(--bg-glass);
+}
+
+@media (max-width: 768px) {
+  .desktopLinks { display: none; }
+  .emergencyCta { display: none; }
+  .mobileToggle { display: block; }
+  .mobileMenu {
+    display: flex;
+    flex-direction: column;
+    background: rgba(10, 14, 26, 0.95);
+    backdrop-filter: blur(20px);
+    border-top: 1px solid var(--border-subtle);
+  }
+}
+
+/* ── Agencies Portal Navbar ─────────────────────────── */
+.agenciesNav.scrolled {
+  background: rgba(5, 8, 18, 0.92);
+}
+
+.agencyLinks {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  justify-content: center;
+}
+
+.agencyNavLink {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-radius: var(--radius-full);
+  border: 1px solid transparent;
+  transition: all 0.25s ease;
+  text-decoration: none;
+}
+
+.agencyNavLink:hover {
+  color: var(--text-primary);
+  background: var(--bg-glass);
+  border-color: rgba(255,255,255,0.1);
+}
+
+.agencyNavActive {
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255,255,255,0.12);
+}
+
+.agencyNavIcon {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  transition: color 0.2s;
+}
+
+@media (max-width: 768px) {
+  .agencyLinks { display: none; }
+}

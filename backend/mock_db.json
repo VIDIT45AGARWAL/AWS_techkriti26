@@ -1,0 +1,109 @@
+{
+  "INC-59671A07": {
+    "id": "INC-59671A07",
+    "type": "Building Fire",
+    "severity": "critical",
+    "departments": [
+      "Fire Department",
+      "Medical Emergency",
+      "Police"
+    ],
+    "location": "Sector 15, Kanpur, Uttar Pradesh 208002",
+    "coordinates": {
+      "lat": 26.4499,
+      "lng": 80.3319
+    },
+    "casualties": "3-5 people trapped, 2 injured",
+    "summary": "Major structural fire in a residential building. Multiple residents reported trapped on upper floors. Smoke visible from distance. Two confirmed injuries \u2014 burn wounds.",
+    "transcript": "Major fire reported at the central market. People are trapped inside.",
+    "confidence": 94.0,
+    "status": "active",
+    "timestamp": "2026-03-20T16:16:23.188439",
+    "language": "en-IN"
+  },
+  "INC-F65A5F9F": {
+    "id": "INC-F65A5F9F",
+    "type": "Building Fire",
+    "severity": "critical",
+    "departments": [
+      "Fire Department",
+      "Medical Emergency",
+      "Police"
+    ],
+    "location": "Sector 15, Kanpur, Uttar Pradesh 208002",
+    "coordinates": {
+      "lat": 26.4499,
+      "lng": 80.3319
+    },
+    "casualties": "3-5 people trapped, 2 injured",
+    "summary": "Major structural fire in a residential building. Multiple residents reported trapped on upper floors. Smoke visible from distance. Two confirmed injuries \u2014 burn wounds.",
+    "transcript": "Major fire reported at the central market. People are trapped inside.",
+    "confidence": 94.0,
+    "status": "active",
+    "timestamp": "2026-03-20T16:17:47.470343",
+    "language": "en-IN"
+  },
+  "INC-2D79E670": {
+    "id": "INC-2D79E670",
+    "type": "General Emergency",
+    "severity": "medium",
+    "departments": [
+      "Police"
+    ],
+    "location": "Sector 15, Kanpur, Uttar Pradesh 208002",
+    "coordinates": {
+      "lat": 26.5190843,
+      "lng": 80.2216636
+    },
+    "casualties": "Unknown",
+    "summary": "Emergency report received: Earthquake in Ati Kanpur.",
+    "transcript": "Earthquake in Ati Kanpur.",
+    "confidence": 72.0,
+    "status": "active",
+    "timestamp": "2026-03-20T16:20:02.174697",
+    "language": "en-IN"
+  },
+  "INC-2FA13F84": {
+    "id": "INC-2FA13F84",
+    "type": "Building Fire",
+    "severity": "critical",
+    "departments": [
+      "Fire Department",
+      "Medical Emergency",
+      "Police"
+    ],
+    "location": "Sector 15, Kanpur, Uttar Pradesh 208002",
+    "coordinates": {
+      "lat": 26.5190843,
+      "lng": 80.2216636
+    },
+    "casualties": "3-5 people trapped, 2 injured",
+    "summary": "Major structural fire in a residential building. Multiple residents reported trapped on upper floors. Smoke visible from distance. Two confirmed injuries \u2014 burn wounds.",
+    "transcript": "Fire, fire, fire",
+    "confidence": 94.0,
+    "status": "active",
+    "timestamp": "2026-03-20T16:22:44.358572",
+    "language": "en-IN"
+  },
+  "INC-406D729C": {
+    "id": "INC-406D729C",
+    "type": "Road Accident",
+    "severity": "high",
+    "departments": [
+      "Police",
+      "Medical Emergency"
+    ],
+    "location": "Sector 15, Kanpur, Uttar Pradesh 208002",
+    "coordinates": {
+      "lat": 26.5190843,
+      "lng": 80.2216636
+    },
+    "casualties": "4 injured",
+    "summary": "Multi-vehicle collision reported. Traffic blocked. Multiple injuries requiring immediate medical attention.",
+    "transcript": "Car accident on the road",
+    "confidence": 91.0,
+    "status": "active",
+    "timestamp": "2026-03-20T16:23:10.277536",
+    "language": "en-IN"
+  }
+}
