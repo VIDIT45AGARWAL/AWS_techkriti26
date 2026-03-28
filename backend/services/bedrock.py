@@ -90,8 +90,8 @@ async def _analyze_with_bedrock(transcript: str) -> dict:
     client = boto3.client(
         "bedrock-runtime",
         region_name=os.getenv("AWS_REGION", "ap-south-1"),
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        aws_access_key_id=os.getenv("BEDROCK_AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.getenv("BEDROCK_AWS_SECRET_ACCESS_KEY"),
     )
 
     prompt = f"""You are an emergency triage AI. Analyze this emergency report and extract structured data.

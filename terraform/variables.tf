@@ -65,5 +65,5 @@ variable "alert_email" {
 variable "github_repo_url" {
   description = "GitHub repository URL (HTTPS) for cloning backend code onto EC2"
   type        = string
-  default     = "https://github.com/SwarritSrivastava/AWS_TechKriti_pvt.git"
+  default     = "https://github.com/VIDIT45AGARWAL/AWS_techkriti26.git"
 }
