@@ -87,12 +87,15 @@ async def _analyze_with_bedrock(transcript: str) -> dict:
     """Use AWS Bedrock with Claude models."""
     import boto3
 
-    client = boto3.client(
-        "bedrock-runtime",
-        region_name=os.getenv("AWS_REGION", "ap-south-1"),
-        aws_access_key_id=os.getenv("BEDROCK_AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("BEDROCK_AWS_SECRET_ACCESS_KEY"),
-    )
+    # Only pass explicit credentials if set; otherwise use EC2 instance profile
+    client_kwargs = {
+        "region_name": os.getenv("AWS_REGION", "ap-south-1"),
+    }
+    if os.getenv("BEDROCK_AWS_ACCESS_KEY_ID"):
+        client_kwargs["aws_access_key_id"] = os.getenv("BEDROCK_AWS_ACCESS_KEY_ID")
+        client_kwargs["aws_secret_access_key"] = os.getenv("BEDROCK_AWS_SECRET_ACCESS_KEY")
+
+    client = boto3.client("bedrock-runtime", **client_kwargs)
 
     prompt = f"""You are an emergency triage AI. Analyze this emergency report and extract structured data.
 
@@ -124,16 +127,14 @@ Return a JSON object with these exact fields:
 
 Return ONLY valid JSON, no other text."""
 
-    model_id = os.getenv("BEDROCK_MODEL_ID", "apac.anthropic.claude-3-5-sonnet-20241022-v2:0")
+    model_id = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-sonnet-20240229-v1:0")
     
+    # Note: extended thinking is only supported on claude-3-7 and newer
+    # Use standard request body for claude-3-sonnet
     request_body = {
         "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 4096,
+        "max_tokens": 1024,
         "messages": [{"role": "user", "content": prompt}],
-        "thinking": {
-            "type": "enabled",
-            "budget_tokens": 3000
-        }
     }
 
     response = client.invoke_model(
@@ -144,20 +145,14 @@ Return ONLY valid JSON, no other text."""
 
     result = json.loads(response["body"].read())
     
-    thinking_content = ""
+    # claude-3-sonnet returns a single text block
     response_text = ""
-    
     for block in result.get("content", []):
-        if block.get("type") == "thinking":
-            thinking_content = block.get("thinking", "")
-        elif block.get("type") == "text":
+        if block.get("type") == "text":
             response_text = block.get("text", "")
-    
+            break
+
     parsed = json.loads(response_text)
-    
-    if thinking_content:
-        print(f"[AI REASONING]: {thinking_content}")
-    
     return parsed
 
 
