@@ -9,6 +9,13 @@ const ICONS: Record<string, React.ElementType> = {
   Flame, Shield, Heart, CloudLightning,
 };
 
+export function generateStaticParams() {
+  const { AGENCIES } = require("@/lib/agencyConfig");
+  return AGENCIES.map((agency: any) => ({
+    agency: agency.slug,
+  }));
+}
+
 export default async function AgencyLayout({
   children,
   params,

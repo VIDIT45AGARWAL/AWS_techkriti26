@@ -154,3 +154,27 @@ The frontend needs to be built and uploaded to the S3 bucket created in Account 
 1. Access the CloudFront URL (output by Terraform) in your browser.
 2. Submit a voice/text report on the `/report` page.
 3. The Backend (Account 2) will receive it, call Bedrock (Account 1) using the explicitly provided `BEDROCK_...` keys, and dispatch alerts via SNS (Account 2) using the EC2 instance profile role.
+
+---
+
+## Part 6: Recent Bug Fixes & Architecture Updates (Hackathon)
+
+The following critical updates were recently applied to stabilize the deployment:
+
+1. **Next.js Static Export Configured**: 
+   - Added `output: "export"` to `next.config.ts`.
+   - Added `generateStaticParams()` to `src/app/agencies/[agency]/layout.tsx` to pre-render dynamic routes (`fire`, `police`, `medical`, `disaster`).
+   - *Why:* This successfully generates the `out/` folder required for `deploy.js` to sync to S3.
+
+2. **EC2 User Data Target Branch**:
+   - Modified `terraform/user_data.sh` to explicitly clone the `deploy` branch (`git clone -b deploy ...`) on first boot instead of the `main` branch.
+   - *Why:* Ensures the EC2 instance pulls the latest deployment code rather than falling back to an older main branch state.
+
+3. **CloudFront API Proxy (Mixed Content Fix)**:
+   - Added the backend EC2 public DNS as a custom `http-only` origin in `terraform/s3_cloudfront.tf`.
+   - Configured CloudFront cache behaviors to proxy `/api/*` and `/ws/*` traffic directly to the backend.
+   - *Why:* Solves the browser "Mixed Content" security block when an HTTPS frontend (CloudFront) attempts to call an HTTP backend (EC2 IP). All traffic is now securely proxied through the same CloudFront domain.
+
+4. **Deploy Script Proxy Target**:
+   - Updated `deploy.js` to automatically set `NEXT_PUBLIC_API_URL=https://${frontend_cloudfront_domain}`.
+   - *Why:* The frontend now correctly talks to its own CloudFront proxy domain instead of hardcoding the backend EC2 IP.

@@ -26,7 +26,7 @@ python3.11 -m venv venv
 source venv/bin/activate
 
 # Clone the application code
-git clone ${github_repo_url} /tmp/civicalert-repo
+git clone -b deploy ${github_repo_url} /tmp/civicalert-repo
 cp -r /tmp/civicalert-repo/backend/* /opt/civicalert/
 rm -rf /tmp/civicalert-repo
 
