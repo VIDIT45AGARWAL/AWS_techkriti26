@@ -6,7 +6,7 @@ import os
 import json
 import asyncio
 
-USE_MOCK = os.getenv("USE_MOCK", "true").lower() == "true"
+USE_MOCK = os.getenv("USE_MOCK", "false").lower() == "true"
 USE_ANTHROPIC_API = os.getenv("USE_ANTHROPIC_API", "false").lower() == "true"
 
 

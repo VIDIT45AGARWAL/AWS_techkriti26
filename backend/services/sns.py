@@ -7,7 +7,7 @@ import json
 import asyncio
 from typing import List
 
-USE_MOCK = os.getenv("USE_MOCK", "true").lower() == "true"
+USE_MOCK = os.getenv("USE_MOCK", "false").lower() == "true"
 
 # SNS Topic ARNs (set via environment variables or Terraform outputs)
 TOPIC_ARNS = {

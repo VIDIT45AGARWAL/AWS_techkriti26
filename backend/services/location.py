@@ -6,7 +6,7 @@ import os
 import asyncio
 from typing import Optional, Tuple
 
-USE_MOCK = os.getenv("USE_MOCK", "true").lower() == "true"
+USE_MOCK = os.getenv("USE_MOCK", "false").lower() == "true"
 
 
 async def geocode(location_text: str) -> Optional[Tuple[float, float]]:

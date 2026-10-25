@@ -8,7 +8,7 @@ import asyncio
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
-USE_MOCK = os.getenv("USE_MOCK", "true").lower() == "true"
+USE_MOCK = os.getenv("USE_MOCK", "false").lower() == "true"
 TABLE_NAME = os.getenv("DYNAMODB_TABLE_NAME", "civic-alert-incidents-dev")
 
 MOCK_DB_FILE = os.path.join(os.path.dirname(__file__), "..", "mock_db.json")

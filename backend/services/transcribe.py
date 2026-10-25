@@ -16,8 +16,8 @@ from typing import AsyncGenerator
 
 import boto3
 
-# Set USE_MOCK=true for local development without AWS credentials
-USE_MOCK = os.getenv("USE_MOCK", "true").lower() == "true"
+# Set USE_MOCK=true for local development without AWS credentials (demo mode OFF by default)
+USE_MOCK = os.getenv("USE_MOCK", "false").lower() == "true"
 
 
 async def transcribe_audio(audio_bytes: bytes, language_code: str = "en-IN") -> str:

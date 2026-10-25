@@ -172,9 +172,8 @@ export default function ReportPage() {
       };
 
       ws.onerror = () => {
-        // WebSocket failed — fall back to simulated transcription
-        console.warn("WebSocket connection failed, using simulated transcription");
-        simulateFallbackTranscription();
+        // WebSocket failed — real transcription unavailable; do NOT fake a transcript
+        console.warn("WebSocket connection failed — live transcription unavailable");
       };
 
       // Start recording raw PCM audio using ScriptProcessorNode
@@ -200,23 +199,8 @@ export default function ReportPage() {
       processor.connect(audioCtxRef.current!.destination);
 
     } catch (err: any) {
-      // WebSocket not available — use fallback
+      // WebSocket not available — real transcription unavailable; do NOT fake a transcript
       console.error("WebSocket setup error:", err);
-      simulateFallbackTranscription();
-    }
-  };
-
-  const simulateFallbackTranscription = async () => {
-    const words =
-      "There is a large fire in a building near sector 15 Kanpur people are trapped on the third floor I can see smoke everywhere two people are injured please send help immediately".split(
-        " "
-      );
-    let currentText = "";
-    for (let i = 0; i < words.length; i++) {
-      await new Promise((r) => setTimeout(r, 150 + Math.random() * 100));
-      currentText += (i > 0 ? " " : "") + words[i];
-      transcriptRef.current = currentText;
-      setTranscript(currentText);
     }
   };
 
@@ -633,7 +617,6 @@ export default function ReportPage() {
                   <CheckCircle2 size={20} />
                   <span>
                     Alert dispatched to {result.departments.length} departments
-                    in 8.3 seconds
                   </span>
                   {audioUrl && (
                     <button

@@ -22,8 +22,8 @@ from .transcribe import _mock_streaming_transcribe, _mock_transcribe
 
 SARVAM_BASE = "https://api.sarvam.ai"
 
-# USE_MOCK=true for local development without API calls
-USE_MOCK = os.getenv("USE_MOCK", "true").lower() == "true"
+# USE_MOCK=true for local development without API calls (demo mode OFF by default)
+USE_MOCK = os.getenv("USE_MOCK", "false").lower() == "true"
 
 # ─── Voice models ───
 STT_MODEL = "saaras:v4"
