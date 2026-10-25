@@ -25,6 +25,35 @@ def _is_generic_location(location_text: str) -> bool:
     return (location_text or "").strip().lower().rstrip(".,") in _GENERIC_LOCATIONS
 
 
+# Words that carry no place meaning when scoring geocode candidates
+_TOKEN_STOPWORDS = {
+    "the", "a", "an", "of", "in", "at", "near", "on", "by", "to", "from",
+    "and", "road", "street", "lane", "market", "area", "colony", "sector",
+    "block", "building", "depot", "station", "place", "house", "shop",
+}
+
+
+def _score_result(label: str, query_tokens: list) -> float:
+    """
+    Score a geocode candidate by how many query tokens its label contains.
+    Later tokens weigh more: in spoken descriptions the city usually comes
+    last ("the market lane of Chunniganj in Kanpur"), so 'kanpur' matters
+    more than 'market'.
+    """
+    label_lower = (label or "").lower()
+    score = 0.0
+    for weight, token in enumerate(query_tokens, start=1):
+        if token in label_lower:
+            score += weight
+    return score
+
+
+def _tokenize_query(location_text: str) -> list:
+    import re as _re
+    tokens = _re.findall(r"[a-z\u0900-\u097F]{3,}", (location_text or "").lower())
+    return [t for t in tokens if t not in _TOKEN_STOPWORDS]
+
+
 async def geocode(
     location_text: str,
     bias_near: Optional[Tuple[float, float]] = None,
@@ -51,38 +80,57 @@ async def geocode(
     client_kwargs = {"region_name": os.getenv("AWS_REGION", "ap-south-1")}
     index_name = os.getenv("LOCATION_INDEX_NAME", "civic-alert-places-prod")
 
-    def _search(text: str) -> Optional[Tuple[float, float]]:
+    def _search(text: str, max_results: int = 5) -> list:
+        """Return scored (score, lat, lng) candidates for a query text."""
         import boto3
 
         client = boto3.client("location", **client_kwargs)
         kwargs = {
             "IndexName": index_name,
             "Text": text,
-            "MaxResults": 1,
+            "MaxResults": max_results,
             "FilterCountries": ["IND"],  # CivicAlert is an India-wide service
         }
         if bias_near:
             # Bias toward the reporter's area: ~100km box around them
             kwargs["BiasPosition"] = [bias_near[1], bias_near[0]]  # [lng, lat]
         response = client.search_place_index_for_text(**kwargs)
-        results = response.get("Results", [])
-        if results:
-            place = results[0].get("Place", {})
+        candidates = []
+        for r in response.get("Results", []):
+            place = r.get("Place", {})
             point = place.get("Geometry", {}).get("Point", [])
             if len(point) == 2:
-                return (point[1], point[0])  # Convert [lng, lat] to (lat, lng)
-        return None
+                label = place.get("Label", "")
+                candidates.append(
+                    (_score_result(label, query_tokens), point[1], point[0], label)
+                )
+        # Best score first; ties keep Esri's relevance order
+        candidates.sort(key=lambda c: -c[0])
+        return candidates
 
+    query_tokens = _tokenize_query(clean)
     try:
         # 1st attempt: as spoken / typed (restricted to India)
-        coords = _search(clean)
-        if coords:
-            return coords
+        candidates = _search(clean)
+        if candidates and candidates[0][0] > 0:
+            _, lat, lng, label = candidates[0]
+            print(f"[GEOCODE] '{clean}' -> {label} ({lat:.4f}, {lng:.4f})")
+            return (lat, lng)
         # 2nd attempt: anchor explicitly to India for ambiguous local names
         if "india" not in clean.lower():
-            coords = _search(f"{clean}, India")
-            if coords:
-                return coords
+            candidates = _search(f"{clean}, India")
+            if candidates and candidates[0][0] > 0:
+                _, lat, lng, label = candidates[0]
+                print(f"[GEOCODE] '{clean}, India' -> {label} ({lat:.4f}, {lng:.4f})")
+                return (lat, lng)
+        # 3rd attempt: fall back to the final spoken token (usually the city)
+        if query_tokens:
+            city = query_tokens[-1]
+            candidates = _search(city)
+            if candidates:
+                _, lat, lng, label = candidates[0]
+                print(f"[GEOCODE] fallback '{city}' -> {label} ({lat:.4f}, {lng:.4f})")
+                return (lat, lng)
         return None
     except Exception as e:
         print(f"AWS Location Geocoding Error: {e}")
