@@ -12,7 +12,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from services.transcribe import transcribe_audio, transcribe_audio_streaming
+# Voice: Sarvam Saaras v4 (STT, replaces Amazon Transcribe) + Bulbul v4 Flash (TTS)
+from services.sarvam import transcribe_audio, transcribe_audio_streaming, synthesize_speech, speaker_for, TTS_MODEL
 from services.bedrock import analyze_incident
 from services.sns import dispatch_alerts
 from services.location import reverse_geocode, geocode
@@ -194,18 +195,43 @@ def health_check():
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat() + "Z"}
 
 
+# ─── Text-to-Speech (Sarvam Bulbul v4 Flash) ───
+
+class TTSRequest(BaseModel):
+    text: str
+    language: str = "en-IN"
+
+@app.post("/api/tts")
+async def text_to_speech(req: TTSRequest):
+    """
+    Synthesize spoken audio from text using Sarvam Bulbul v4 Flash.
+    Returns a base64 audio data URL playable directly by the frontend.
+    """
+    audio = await synthesize_speech(req.text, req.language)
+    if not audio:
+        raise HTTPException(status_code=502, detail="Speech synthesis failed (check SARVAM_API_KEY)")
+    return {
+        "audio": audio,
+        "model": TTS_MODEL,
+        "speaker": speaker_for(req.language),
+        "language": req.language,
+    }
+
+
 # ─── WebSocket: Real-time Voice Transcription ───
 
 @app.websocket("/ws/transcribe")
 async def websocket_transcribe(websocket: WebSocket):
     """
-    WebSocket endpoint for real-time speech-to-text.
+    WebSocket endpoint for real-time speech-to-text (Sarvam Saaras v4).
     
     Protocol:
     1. Client sends JSON: {"type": "config", "language": "en-IN", "sampleRate": 16000}
-    2. Client sends binary audio chunks (PCM 16-bit or base64-encoded)
+    2. Client sends binary audio chunks (PCM 16-bit mono, 16kHz)
     3. Server streams back JSON: {"type": "transcript", "text": "...", "is_partial": true/false}
-    4. Client sends JSON: {"type": "stop"} to end the stream
+    4. Client sends JSON: {"type": "stop"} to end the stream,
+       server runs a final full transcription and replies with the complete
+       transcript followed by {"type": "done"}
     """
     await websocket.accept()
     
@@ -224,15 +250,12 @@ async def websocket_transcribe(websocket: WebSocket):
             await websocket.send_json({"type": "ready"})
         
         async def audio_chunk_generator():
-            """Yield audio chunks from the WebSocket."""
-            while is_streaming:
-                try:
-                    chunk = await asyncio.wait_for(audio_queue.get(), timeout=1.0)
-                    if chunk is None:
-                        break
-                    yield chunk
-                except asyncio.TimeoutError:
-                    continue
+            """Yield audio chunks from the WebSocket until the stop sentinel."""
+            while True:
+                chunk = await audio_queue.get()
+                if chunk is None:
+                    break
+                yield chunk
         
         async def receive_audio():
             """Receive audio data from WebSocket and queue it."""

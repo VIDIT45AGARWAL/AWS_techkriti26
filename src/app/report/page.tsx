@@ -17,6 +17,7 @@ import {
   Loader2,
   ChevronDown,
   Send,
+  Volume2,
 } from "lucide-react";
 import styles from "./report.module.css";
 
@@ -67,15 +68,19 @@ export default function ReportPage() {
   const [processingStep, setProcessingStep] = useState(0);
   const [audioLevel, setAudioLevel] = useState<number[]>(Array(30).fill(4));
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioPlaying, setAudioPlaying] = useState(false);
   const animFrameRef = useRef<number | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const transcriptRef = useRef(""); // latest transcript (incl. final from server)
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
 
   const processingSteps = [
-    "Transcribing audio via Amazon Transcribe...",
+    "Transcribing audio via Sarvam Saaras v4...",
     "Extracting incident details via Amazon Bedrock...",
     "Classifying severity and department routing...",
     "Dispatching alerts via Amazon SNS...",
@@ -112,6 +117,7 @@ export default function ReportPage() {
   const startRecording = async () => {
     setPhase("recording");
     setTranscript("");
+    transcriptRef.current = "";
     setResult(null);
 
     // Get microphone access
@@ -123,7 +129,8 @@ export default function ReportPage() {
       streamRef.current = stream;
 
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      const audioCtx = new AudioContextClass();
+      // 16 kHz matches Sarvam Saaras' recommended sample rate for PCM input
+      const audioCtx = new AudioContextClass({ sampleRate: 16000 });
       audioCtxRef.current = audioCtx;
       const source = audioCtx.createMediaStreamSource(stream);
       const analyser = audioCtx.createAnalyser();
@@ -156,6 +163,7 @@ export default function ReportPage() {
         try {
           const data = JSON.parse(event.data);
           if (data.type === "transcript" && data.text) {
+            transcriptRef.current = data.text;
             setTranscript(data.text);
           }
         } catch {
@@ -207,8 +215,64 @@ export default function ReportPage() {
     for (let i = 0; i < words.length; i++) {
       await new Promise((r) => setTimeout(r, 150 + Math.random() * 100));
       currentText += (i > 0 ? " " : "") + words[i];
+      transcriptRef.current = currentText;
       setTranscript(currentText);
     }
+  };
+
+  // Resolves when the server sends {type:"done"} or {type:"error"}, or on timeout.
+  const waitForTranscriptDone = (ws: WebSocket, timeoutMs: number) =>
+    new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        ws.removeEventListener("message", onMsg);
+        resolve();
+      };
+      const onMsg = (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "done" || data.type === "error") finish();
+        } catch {
+          // Ignore malformed messages
+        }
+      };
+      ws.addEventListener("message", onMsg);
+      setTimeout(finish, timeoutMs);
+    });
+
+  // Synthesize a spoken dispatch summary via Sarvam Bulbul v4 (best-effort).
+  const playDispatchAudio = async (text: string) => {
+    if (!text) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, language: language.code }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.audio) return;
+
+      const el = audioElRef.current ?? new Audio();
+      audioElRef.current = el;
+      el.src = data.audio;
+      el.onplay = () => setAudioPlaying(true);
+      el.onended = () => setAudioPlaying(false);
+      el.onerror = () => setAudioPlaying(false);
+      setAudioUrl(data.audio);
+      await el.play();
+    } catch {
+      // Speech playback unavailable — the report itself is unaffected
+    }
+  };
+
+  const togglePlayback = () => {
+    const el = audioElRef.current;
+    if (!el) return;
+    if (el.paused) el.play().catch(() => {});
+    else el.pause();
   };
 
   const stopRecording = async () => {
@@ -222,8 +286,16 @@ export default function ReportPage() {
       streamRef.current.getTracks().forEach((t) => t.stop());
     }
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "stop" }));
-      wsRef.current.close();
+      const ws = wsRef.current;
+      ws.send(JSON.stringify({ type: "stop" }));
+      // Sarvam Saaras v4 runs a final full transcription after the stream ends;
+      // wait for the complete transcript before filing the report.
+      await waitForTranscriptDone(ws, 45000);
+      try {
+        ws.close();
+      } catch {
+        // Already closed
+      }
     }
     if (audioCtxRef.current) {
       audioCtxRef.current.close();
@@ -232,8 +304,9 @@ export default function ReportPage() {
     setAudioLevel(Array(30).fill(4));
     setPhase("processing");
 
-    // Get the current transcript text
-    const currentTranscript = transcript || "Emergency report submitted via voice";
+    // Get the current transcript text (final transcript from Sarvam preferred)
+    const currentTranscript =
+      transcriptRef.current || transcript || "Emergency report submitted via voice";
 
     // Step 1: Transcribing (already done via streaming)
     setProcessingStep(0);
@@ -241,6 +314,8 @@ export default function ReportPage() {
 
     // Step 2-4: Send to backend API for real AI triage
     setProcessingStep(1);
+
+    let triage: TriageResult | null = null;
 
     try {
       const response = await fetch(`${API_BASE}/api/report`, {
@@ -262,7 +337,7 @@ export default function ReportPage() {
         setProcessingStep(3);
         await new Promise((r) => setTimeout(r, 400));
 
-        setResult({
+        triage = {
           incident_type: incident.type || "Unknown",
           severity: incident.severity || "medium",
           location: incident.location || "Unknown",
@@ -270,7 +345,8 @@ export default function ReportPage() {
           departments: incident.departments || ["Police"],
           summary: incident.summary || currentTranscript,
           confidence: incident.confidence || 75,
-        });
+        };
+        setResult(triage);
       } else {
         throw new Error(`API returned ${response.status}`);
       }
@@ -283,7 +359,7 @@ export default function ReportPage() {
       setProcessingStep(3);
       await new Promise((r) => setTimeout(r, 600));
 
-      setResult({
+      triage = {
         incident_type: "General Emergency",
         severity: "medium",
         location: coords
@@ -293,10 +369,20 @@ export default function ReportPage() {
         departments: ["Police"],
         summary: currentTranscript,
         confidence: 70,
-      });
+      };
+      setResult(triage);
     }
 
     setPhase("done");
+
+    // Spoken dispatch summary via Sarvam Bulbul v4 Flash (best-effort)
+    if (triage) {
+      void playDispatchAudio(
+        `Emergency report. Type: ${triage.incident_type}. Severity: ${triage.severity}. ` +
+          `Location: ${triage.location}. ${triage.departments.length} departments notified. ` +
+          `${triage.summary}`
+      );
+    }
   };
 
   useEffect(() => {
@@ -314,12 +400,19 @@ export default function ReportPage() {
       if (audioCtxRef.current) {
         audioCtxRef.current.close();
       }
+      if (audioElRef.current) {
+        audioElRef.current.pause();
+      }
     };
   }, []);
 
   const resetReport = () => {
+    if (audioElRef.current) audioElRef.current.pause();
+    setAudioUrl(null);
+    setAudioPlaying(false);
     setPhase("idle");
     setTranscript("");
+    transcriptRef.current = "";
     setResult(null);
     setProcessingStep(0);
   };
@@ -542,6 +635,16 @@ export default function ReportPage() {
                     Alert dispatched to {result.departments.length} departments
                     in 8.3 seconds
                   </span>
+                  {audioUrl && (
+                    <button
+                      className={styles.replayButton}
+                      onClick={togglePlayback}
+                      title={audioPlaying ? "Pause spoken summary (Sarvam Bulbul v4)" : "Play spoken summary (Sarvam Bulbul v4)"}
+                      aria-label={audioPlaying ? "Pause spoken summary" : "Play spoken summary"}
+                    >
+                      <Volume2 size={16} />
+                    </button>
+                  )}
                 </div>
 
                 {/* Result Cards Grid */}

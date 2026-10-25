@@ -282,6 +282,27 @@
   font-size: 0.95rem;
 }
 
+.replayButton {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.15);
+  color: #6ee7b7;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.2s;
+}
+
+.replayButton:hover {
+  background: rgba(16, 185, 129, 0.3);
+  transform: scale(1.08);
+}
+
 .resultGrid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
