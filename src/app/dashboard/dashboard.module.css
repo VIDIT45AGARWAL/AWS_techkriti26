@@ -427,3 +427,49 @@
   .header { flex-direction: column; align-items: flex-start; gap: 12px; }
   .title { font-size: 1.5rem; }
 }
+
+/* ─── Voice conversation log (admin panel) ─── */
+
+.conversationLog {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: var(--radius-md, 10px);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.convoTitle {
+  margin: 0 0 4px 0;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+
+.convoTurn {
+  display: flex;
+  gap: 8px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.convoRole {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--accent-blue);
+}
+
+.convoCaller {
+  color: var(--accent-red);
+}
+
+.convoText {
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

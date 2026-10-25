@@ -58,6 +58,18 @@ def _has_signal(keywords: list, text: str) -> bool:
     return False
 
 
+def _normalize_confidence(analysis: dict) -> dict:
+    """Models return confidence as 0-1 or 0-100 — normalize to 0-100."""
+    conf = analysis.get("confidence")
+    if isinstance(conf, (int, float)):
+        if conf <= 1.0:
+            conf *= 100
+        analysis["confidence"] = round(min(max(conf, 0.0), 100.0), 1)
+    else:
+        analysis["confidence"] = 50.0
+    return analysis
+
+
 def _normalize_department(name: str) -> str | None:
     """Map a free-form department name to a canonical one (or None)."""
     n = (name or "").lower().strip()
@@ -138,16 +150,7 @@ async def analyze_incident(transcript: str) -> dict:
 
     # Guarantee the correct force is dispatched for the correct emergency
     analysis["departments"] = _enforce_department_rules(analysis, transcript)
-
-    # Normalize confidence: models return either 0-1 or 0-100 — UI wants 0-100
-    conf = analysis.get("confidence")
-    if isinstance(conf, (int, float)):
-        if conf <= 1.0:
-            conf *= 100
-        analysis["confidence"] = round(min(max(conf, 0.0), 100.0), 1)
-    else:
-        analysis["confidence"] = 50.0
-    return analysis
+    return _normalize_confidence(analysis)
 
 
 async def _analyze_with_anthropic(transcript: str) -> dict:

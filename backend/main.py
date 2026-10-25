@@ -15,8 +15,8 @@ load_dotenv()
 # Voice: Sarvam Saaras v4 (STT, replaces Amazon Transcribe) + Bulbul v4 Flash (TTS)
 from services.sarvam import transcribe_audio, transcribe_audio_streaming, synthesize_speech, speaker_for, TTS_MODEL
 from services.bedrock import analyze_incident
+from services.conversation import converse
 from services.sns import dispatch_alerts
-from services.location import reverse_geocode, geocode
 from services.dynamodb import (
     put_incident as db_put,
     get_incidents as db_get_all,
@@ -44,19 +44,27 @@ app.add_middleware(
 class Coordinates(BaseModel):
     lat: float
     lng: float
+    # Retained for API compatibility; geolocation has been removed.
+
+class ChatTurn(BaseModel):
+    role: str  # "user" | "assistant"
+    text: str
+
+class ConverseRequest(BaseModel):
+    transcript: str                       # latest caller utterance
+    language: str = "en-IN"
+    history: List[ChatTurn] = []          # previous turns (stateless client)
 
 class IncidentReport(BaseModel):
     transcript: Optional[str] = None
     language: str = "en-IN"
-    coordinates: Optional[Coordinates] = None
 
 class Incident(BaseModel):
     id: str
     type: str
     severity: str
     departments: List[str]
-    location: str
-    coordinates: Optional[Coordinates] = None  # None when no GPS and none extracted
+    location: str                         # as described by the caller (no geolocation)
     casualties: str
     summary: str
     transcript: str
@@ -64,6 +72,7 @@ class Incident(BaseModel):
     status: str
     timestamp: str
     language: str = "en-IN"
+    conversation: List[dict] = []          # full voice conversation for the admin panel
 
 
 # ─── Routes ───
@@ -81,45 +90,23 @@ def root():
 @app.post("/api/report", response_model=Incident)
 async def report_incident(report: IncidentReport):
     """
-    Submit an emergency report via text transcript.
+    Submit an emergency report via text transcript (one-shot, non-conversational).
     The system will:
     1. Analyze & classify via Amazon Bedrock
-    2. Extract location from transcript or use provided coordinates
-    3. Reverse geocode coordinates via AWS Location Service
-    4. Dispatch alerts via Amazon SNS
-    5. Store incident in DynamoDB
+    2. Take the location exactly as described in the report (no geolocation)
+    3. Dispatch alerts via Amazon SNS
+    4. Store incident + full details in DynamoDB (admin panel)
     """
     if not report.transcript:
         raise HTTPException(status_code=400, detail="Provide transcript text")
-    
+
     transcript = report.transcript
 
     # Step 1: Analyze with Bedrock
     analysis = await analyze_incident(transcript)
 
-    # Step 2: Determine coordinates (honest — never fabricate a location)
-    coords = None
-
-    # Priority 1: Use location extracted from the transcript, biased toward
-    # the reporter's own GPS position for better local accuracy
-    if analysis.get("location_extracted"):
-        geocoded = await geocode(
-            analysis["location_extracted"], bias_near=(
-                (report.coordinates.lat, report.coordinates.lng)
-                if report.coordinates else None
-            )
-        )
-        if geocoded:
-            coords = Coordinates(lat=geocoded[0], lng=geocoded[1])
-
-    # Priority 2: Use coordinates provided by the user's device
-    if not coords and report.coordinates:
-        coords = report.coordinates
-
-    # No placeholder fallback — if we don't know where it is, say so
-    location = (
-        await reverse_geocode(coords.lat, coords.lng) if coords else "Unknown location"
-    )
+    # Step 2: Location is whatever the caller described — no geolocation
+    location = (analysis.get("location_extracted") or "").strip() or "Unknown location"
 
     # Step 3: Build incident
     incident_id = f"INC-{str(uuid.uuid4())[:8].upper()}"
@@ -129,7 +116,6 @@ async def report_incident(report: IncidentReport):
         severity=analysis["severity"],
         departments=analysis["departments"],
         location=location,
-        coordinates=coords,
         casualties=analysis["casualties"],
         summary=analysis["summary"],
         transcript=transcript,
@@ -137,19 +123,85 @@ async def report_incident(report: IncidentReport):
         status="active",
         timestamp=datetime.utcnow().isoformat() + "Z",
         language=report.language,
+        conversation=[{"role": "user", "text": transcript}],
     )
 
-    # Step 4: Store in DynamoDB
+    # Step 4: Store in DynamoDB (admin panel data source)
     await db_put(incident.model_dump())
 
     # Step 5: Dispatch SNS alerts
     await dispatch_alerts(incident.model_dump())
-    
+
     # Log department reasoning if available
     if analysis.get("department_reasoning"):
         print(f"[DEPARTMENT REASONING]: {analysis['department_reasoning']}")
 
     return incident
+
+
+# ─── Conversational Voice Intake ───
+
+@app.post("/api/converse")
+async def converse_with_dispatcher(req: ConverseRequest):
+    """
+    One turn of the conversational emergency intake.
+
+    1. Caller speaks -> Sarvam Saaras v4 transcript arrives here
+    2. Bedrock decides: ask a follow-up question, or file the incident
+    3. The spoken reply is synthesized with Sarvam Bulbul v4 Flash
+    4. On finalization: dispatch via SNS and store everything
+       (full conversation + analysis) in DynamoDB for the admin panel.
+    """
+    if not req.transcript or not req.transcript.strip():
+        raise HTTPException(status_code=400, detail="Empty transcript")
+
+    # Full conversation so far, including this utterance
+    history = [t.model_dump() for t in req.history]
+    history.append({"role": "user", "text": req.transcript.strip()})
+
+    # Run the conversational dispatcher turn
+    result = await converse(history, req.language)
+    reply = result["reply"]
+    status = result["status"]
+
+    # Speak the reply back with Sarvam Bulbul v4 Flash (fail-soft)
+    audio = await synthesize_speech(reply, req.language)
+
+    response = {
+        "status": status,
+        "reply": reply,
+        "audio": audio,
+    }
+
+    if status == "finalized":
+        analysis = result["analysis"]
+        history.append({"role": "assistant", "text": reply})
+
+        incident_id = f"INC-{str(uuid.uuid4())[:8].upper()}"
+        incident = Incident(
+            id=incident_id,
+            type=analysis.get("incident_type") or "General Emergency",
+            severity=analysis.get("severity") or "medium",
+            departments=analysis.get("departments") or ["Police"],
+            location=(analysis.get("location_extracted") or "").strip() or "Unknown location",
+            casualties=analysis.get("casualties") or "Unknown",
+            summary=analysis.get("summary") or req.transcript[:500],
+            transcript=req.transcript,
+            confidence=analysis.get("confidence") or 50.0,
+            status="active",
+            timestamp=datetime.utcnow().isoformat() + "Z",
+            language=req.language,
+            conversation=history,
+        )
+
+        # Store everything in DynamoDB for the admin panel
+        await db_put(incident.model_dump())
+        # Dispatch the correct force(s) via SNS
+        await dispatch_alerts(incident.model_dump())
+
+        response["incident"] = incident.model_dump()
+
+    return response
 
 
 @app.get("/api/incidents")

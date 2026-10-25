@@ -33,6 +33,7 @@ interface Incident {
   casualties: string;
   summary: string;
   status: "active" | "responding" | "resolved";
+  conversation?: { role: string; text: string }[];
 }
 
 const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
@@ -316,6 +317,19 @@ export default function AgencyDashboardPage({
                   )}
                 </div>
                 <p className={mainStyles.detailSummary}>{selectedIncident.summary}</p>
+                {selectedIncident.conversation && selectedIncident.conversation.length > 0 && (
+                  <div className={mainStyles.conversationLog}>
+                    <h4 className={mainStyles.convoTitle}>Voice Conversation</h4>
+                    {selectedIncident.conversation.map((turn, i) => (
+                      <div key={i} className={mainStyles.convoTurn}>
+                        <span className={`${mainStyles.convoRole} ${turn.role === "user" ? mainStyles.convoCaller : ""}`}>
+                          {turn.role === "user" ? "Caller" : "Dispatcher"}
+                        </span>
+                        <span className={mainStyles.convoText}>{turn.text}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {selectedIncident.coordinates && (
                   <div className={mainStyles.detailCoords}>
                     {selectedIncident.coordinates.lat.toFixed(4)}° N,{" "}
