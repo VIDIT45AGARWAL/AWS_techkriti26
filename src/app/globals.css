@@ -223,7 +223,12 @@
   font-size: 12px;
 }
 
-.leaflet-popup-content-wrapper {
+/* Invert the light OSM raster into a quiet dark map */
+:root[data-theme="dark"] .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.88);
+}
+
+.leaflet-container .leaflet-popup-content-wrapper {
   background: var(--panel);
   color: var(--ink);
   border: 1px solid var(--line-strong);
@@ -231,26 +236,26 @@
   box-shadow: none;
 }
 
-.leaflet-popup-content {
+.leaflet-container .leaflet-popup-content {
   margin: 10px 13px;
   font-size: 12.5px;
   line-height: 1.55;
 }
 
-.leaflet-popup-tip {
+.leaflet-container .leaflet-popup-tip {
   background: var(--panel);
   border: 1px solid var(--line-strong);
   box-shadow: none;
 }
 
-.leaflet-popup-close-button {
+.leaflet-container .leaflet-popup-close-button {
   color: var(--muted);
   font-size: 16px;
   width: 24px;
   height: 24px;
 }
 
-.leaflet-popup-close-button:hover {
+.leaflet-container .leaflet-popup-close-button:hover {
   color: var(--ink);
 }
 
@@ -259,7 +264,8 @@
   box-shadow: none;
 }
 
-.leaflet-control-zoom a {
+/* .leaflet-container prefix outranks leaflet.css defaults regardless of bundle order */
+.leaflet-container .leaflet-control-zoom a {
   background: var(--panel);
   color: var(--ink);
   border: 1px solid var(--line);
@@ -267,18 +273,18 @@
   transition: border-color 120ms ease;
 }
 
-.leaflet-control-zoom a:hover {
+.leaflet-container .leaflet-control-zoom a:hover {
   background: var(--panel);
   border-color: var(--line-strong);
 }
 
-.leaflet-control-attribution {
-  background: transparent;
+.leaflet-container .leaflet-control-attribution {
+  background: color-mix(in srgb, var(--canvas) 82%, transparent);
   color: var(--muted);
   font-size: 10px;
 }
 
-.leaflet-control-attribution a {
+.leaflet-container .leaflet-control-attribution a {
   color: var(--muted);
   text-decoration: underline;
   text-underline-offset: 3px;
