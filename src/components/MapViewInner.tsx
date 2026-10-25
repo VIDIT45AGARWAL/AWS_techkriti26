@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect } from "react";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -83,27 +83,10 @@ function InjectStyles() {
   return null;
 }
 
-// ─── Tiles follow the light / dark theme ───
+// ─── Tiles: OpenStreetMap raster (keyless). Dark mode is applied in CSS ───
+// (globals.css inverts the tile pane; Carto's free basemaps now demand an API key.)
 
-const TILE_URLS = {
-  light: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-  dark: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-} as const;
-
-function useThemeName(): "light" | "dark" {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-
-  useEffect(() => {
-    const root = document.documentElement;
-    const read = () => setTheme(root.dataset.theme === "dark" ? "dark" : "light");
-    read();
-    const observer = new MutationObserver(read);
-    observer.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
-    return () => observer.disconnect();
-  }, []);
-
-  return theme;
-}
+const TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 
 // ─── Main map inner component ───
 
@@ -122,7 +105,6 @@ export default function MapViewInner({
   center = [22.5, 78.9], // Center of India
   zoom = 5,
 }: MapViewInnerProps) {
-  const theme = useThemeName();
   const selectedIncident = incidents.find((i) => i.id === selectedId);
   const flyToCoords = selectedIncident ? selectedIncident.coords : null;
 
@@ -136,7 +118,10 @@ export default function MapViewInner({
         zoomControl={true}
         attributionControl={true}
       >
-        <TileLayer key={theme} attribution='&copy; OpenStreetMap &copy; CARTO' url={TILE_URLS[theme]} />
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url={TILE_URL}
+        />
 
         <FlyToSelected coords={flyToCoords} selectedId={selectedId} />
 
