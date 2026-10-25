@@ -4,7 +4,6 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Mic,
-  MicOff,
   Languages,
   MapPin,
   AlertTriangle,
@@ -17,7 +16,8 @@ import {
   Loader2,
   ChevronDown,
   Send,
-  Volume2,
+  PhoneOff,
+  Ear,
   Bot,
 } from "lucide-react";
 import styles from "./report.module.css";
@@ -31,12 +31,25 @@ const languages = [
   { code: "mr-IN", label: "मराठी", flag: "🇮🇳" },
 ];
 
-type Phase = "idle" | "recording" | "thinking" | "done";
+/*
+ * Pure conversational agent — a voice call, not a chat.
+ *
+ *   tap to call → agent listens (Sarvam Saaras v4 streams the transcript)
+ *   → you stop speaking (auto-detected silence or tap) → agent thinks
+ *   → agent speaks its reply aloud (Sarvam Bulbul v4) with a live caption
+ *   → agent automatically resumes listening for your next utterance
+ *   → when it has everything, it files the report and ends the call.
+ */
+type Phase =
+  | "idle" // before the call
+  | "listening" // caller is speaking
+  | "thinking" // dispatcher is deciding
+  | "speaking" // dispatcher's reply is being spoken
+  | "done"; // call ended, report dispatched
 
 interface Message {
   role: "user" | "assistant";
   text: string;
-  audio?: string | null;
 }
 
 interface Incident {
@@ -53,6 +66,11 @@ interface Incident {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const WS_BASE = API_BASE.replace(/^http/, "ws");
+
+// Voice activity detection
+const VAD_THRESHOLD = 0.028; // RMS above this counts as speech
+const VAD_SILENCE_MS = 1500; // silence that ends an utterance
+const VAD_MIN_SPEECH_MS = 350; // ignore blips shorter than this
 
 const departmentIcons: Record<string, React.ElementType> = {
   Police: Shield,
@@ -72,12 +90,11 @@ export default function ReportPage() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [language, setLanguage] = useState(languages[0]);
   const [langOpen, setLangOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [transcript, setTranscript] = useState(""); // live partial during recording
+  const [liveTranscript, setLiveTranscript] = useState(""); // caption while listening
+  const [dispatcherCaption, setDispatcherCaption] = useState(""); // caption while speaking
   const [result, setResult] = useState<Incident | null>(null);
   const [audioLevel, setAudioLevel] = useState<number[]>(Array(30).fill(4));
   const [error, setError] = useState<string | null>(null);
-  const [playingIdx, setPlayingIdx] = useState<number | null>(null);
 
   const animFrameRef = useRef<number | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -87,37 +104,316 @@ export default function ReportPage() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const transcriptRef = useRef("");
   const audioElRef = useRef<HTMLAudioElement | null>(null);
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const historyRef = useRef<Message[]>([]); // conversation for the API
+  const phaseRef = useRef<Phase>("idle");
+  const callActiveRef = useRef(false); // call in progress (until finalized/ended)
+  const vadSpeechStartRef = useRef<number | null>(null);
+  const vadLastVoiceRef = useRef<number>(0);
+  const vadHasVoiceRef = useRef(false);
+  const endingUtteranceRef = useRef(false);
+  const endUtteranceRef = useRef<() => void>(() => {});
 
-  // Scroll the chat to the latest message
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, transcript, phase]);
-
-  const updateAudioLevels = useCallback(() => {
-    if (analyserRef.current) {
-      const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-      analyserRef.current.getByteFrequencyData(dataArray);
-      const levels = Array.from({ length: 30 }, (_, i) => {
-        const idx = Math.floor((i / 30) * dataArray.length);
-        return Math.max(4, (dataArray[idx] / 255) * 50);
-      });
-      setAudioLevel(levels);
-    }
-    animFrameRef.current = requestAnimationFrame(updateAudioLevels);
+  const setPhaseBoth = useCallback((p: Phase) => {
+    phaseRef.current = p;
+    setPhase(p);
   }, []);
 
-  // Play a message's Bulbul v4 audio (auto-play on arrival, tap to replay)
-  const playAudio = useCallback((audio: string | null | undefined, idx: number) => {
-    if (!audio) return;
-    const el = audioElRef.current ?? new Audio();
-    audioElRef.current = el;
-    el.onplay = () => setPlayingIdx(idx);
-    el.onended = () => setPlayingIdx(null);
-    el.onpause = () => setPlayingIdx(null);
-    el.onerror = () => setPlayingIdx(null);
-    el.src = audio;
-    el.play().catch(() => setPlayingIdx(null));
+  // ─── Speech playback (dispatcher voice) ───
+
+  const speakReply = useCallback(
+    (audioDataUrl: string | null, onEnded: () => void) => {
+      if (!audioDataUrl) {
+        onEnded(); // TTS failed — continue silently
+        return;
+      }
+      const el = audioElRef.current ?? new Audio();
+      audioElRef.current = el;
+      el.onended = () => onEnded();
+      el.onerror = () => onEnded();
+      el.src = audioDataUrl;
+      el.play().catch(() => onEnded());
+    },
+    []
+  );
+
+  // ─── Listening: mic → Sarvam Saaras v4 ───
+
+  const openTranscriptionSocket = useCallback((): WebSocket | null => {
+    try {
+      const ws = new WebSocket(`${WS_BASE}/ws/transcribe`);
+      wsRef.current = ws;
+      ws.onopen = () => {
+        ws.send(
+          JSON.stringify({
+            type: "config",
+            language: language.code,
+            sampleRate: audioCtxRef.current?.sampleRate || 16000,
+          })
+        );
+      };
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "transcript" && data.text) {
+            transcriptRef.current = data.text;
+            setLiveTranscript(data.text);
+          }
+        } catch {
+          // Ignore malformed messages
+        }
+      };
+      ws.onerror = () => {
+        console.warn("Transcription socket error");
+      };
+      return ws;
+    } catch (err) {
+      console.error("WebSocket setup error:", err);
+      return null;
+    }
+  }, [language.code]);
+
+  // ─── Voice activity detection loop ───
+
+  const listenLoop = useCallback(() => {
+    const analyser = analyserRef.current;
+    if (analyser) {
+      const buf = new Uint8Array(analyser.fftSize);
+      analyser.getByteTimeDomainData(buf);
+
+      // RMS of the signal (128 = silence)
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) {
+        const v = (buf[i] - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / buf.length);
+
+      // Waveform visualizer
+      const freq = new Uint8Array(analyser.frequencyBinCount);
+      analyser.getByteFrequencyData(freq);
+      setAudioLevel(
+        Array.from({ length: 30 }, (_, i) => {
+          const idx = Math.floor((i / 30) * freq.length);
+          return Math.max(4, (freq[idx] / 255) * 50);
+        })
+      );
+
+      const now = performance.now();
+
+      if (rms > VAD_THRESHOLD) {
+        if (vadSpeechStartRef.current === null) {
+          vadSpeechStartRef.current = now;
+        }
+        vadLastVoiceRef.current = now;
+        vadHasVoiceRef.current = true;
+      }
+
+      // Utterance ended: spoke long enough, then went silent
+      const spokeEnough =
+        vadHasVoiceRef.current &&
+        now - vadSpeechStartRef.current! >= VAD_MIN_SPEECH_MS;
+      const wentSilent = now - vadLastVoiceRef.current >= VAD_SILENCE_MS;
+
+      if (
+        phaseRef.current === "listening" &&
+        callActiveRef.current &&
+        !endingUtteranceRef.current &&
+        spokeEnough &&
+        wentSilent
+      ) {
+        endingUtteranceRef.current = true;
+        endUtteranceRef.current(); // auto turn-taking — no tap needed
+      }
+    }
+    animFrameRef.current = requestAnimationFrame(listenLoop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ─── Call lifecycle ───
+
+  const startCall = async () => {
+    setError(null);
+    setResult(null);
+    historyRef.current = [];
+    setLiveTranscript("");
+    setDispatcherCaption("");
+    transcriptRef.current = "";
+    callActiveRef.current = true;
+    endingUtteranceRef.current = false;
+
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { sampleRate: 16000, channelCount: 1 },
+      });
+      streamRef.current = stream;
+
+      const AudioContextClass =
+        window.AudioContext || (window as any).webkitAudioContext;
+      const audioCtx = new AudioContextClass({ sampleRate: 16000 });
+      audioCtxRef.current = audioCtx;
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
+      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      processorRef.current = processor;
+      processor.onaudioprocess = (e) => {
+        const ws = wsRef.current;
+        // Only stream audio while the agent is listening (no echo of its own voice)
+        if (ws && ws.readyState === WebSocket.OPEN && phaseRef.current === "listening") {
+          const inputData = e.inputBuffer.getChannelData(0);
+          const pcm16 = new Int16Array(inputData.length);
+          for (let i = 0; i < inputData.length; i++) {
+            const s = Math.max(-1, Math.min(1, inputData[i]));
+            pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+          }
+          ws.send(pcm16.buffer);
+        }
+      };
+      analyser.connect(processor);
+      processor.connect(audioCtx.destination);
+    } catch {
+      setError("Microphone access is required for the voice call.");
+      callActiveRef.current = false;
+      return;
+    }
+
+    openTranscriptionSocket();
+    vadSpeechStartRef.current = null;
+    vadHasVoiceRef.current = false;
+    vadLastVoiceRef.current = performance.now();
+    animFrameRef.current = requestAnimationFrame(listenLoop);
+    setPhaseBoth("listening");
+  };
+
+  // Finish the caller's utterance: close the socket, wait for the final
+  // transcript, then hand the turn to the dispatcher.
+  const endUtterance = async () => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "stop" }));
+      await waitForTranscriptDone(ws, 45000);
+      try {
+        ws.close();
+      } catch {
+        /* already closed */
+      }
+    }
+    wsRef.current = null;
+
+    const finalTranscript = transcriptRef.current.trim();
+    setLiveTranscript("");
+    transcriptRef.current = "";
+    vadSpeechStartRef.current = null;
+    vadHasVoiceRef.current = false;
+    endingUtteranceRef.current = false;
+
+    if (!finalTranscript) {
+      // Nothing said — keep listening (don't end the call over silence)
+      if (callActiveRef.current) {
+        openTranscriptionSocket();
+        setPhaseBoth("listening");
+      }
+      return;
+    }
+
+    historyRef.current.push({ role: "user", text: finalTranscript });
+    setPhaseBoth("thinking");
+
+    try {
+      const response = await fetch(`${API_BASE}/api/converse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          transcript: finalTranscript,
+          language: language.code,
+          history: historyRef.current
+            .slice(0, -1)
+            .map((m) => ({ role: m.role, text: m.text })),
+        }),
+      });
+      if (!response.ok) throw new Error(`API returned ${response.status}`);
+
+      const data = await response.json();
+      historyRef.current.push({ role: "assistant", text: data.reply });
+      setDispatcherCaption(data.reply);
+      setPhaseBoth("speaking");
+
+      speakReply(data.audio, () => {
+        if (data.status === "finalized" && data.incident) {
+          setResult(data.incident);
+          callActiveRef.current = false;
+          setPhaseBoth("done");
+        } else if (callActiveRef.current) {
+          // Dispatcher finished speaking — automatically listen again
+          setDispatcherCaption("");
+          openTranscriptionSocket();
+          vadLastVoiceRef.current = performance.now();
+          setPhaseBoth("listening");
+        }
+      });
+    } catch (err) {
+      console.warn("Converse API unavailable:", err);
+      setError("Could not reach the emergency dispatcher. Please try again.");
+      endCall();
+    }
+  };
+  endUtteranceRef.current = endUtterance; // keep the ref fresh for the VAD loop
+
+  // Manually end the whole call (discards unless already filed)
+  const endCall = useCallback(() => {
+    callActiveRef.current = false;
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (wsRef.current) {
+      try {
+        wsRef.current.close();
+      } catch {
+        /* ignore */
+      }
+      wsRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close().catch(() => {});
+      audioCtxRef.current = null;
+    }
+    if (audioElRef.current) {
+      audioElRef.current.pause();
+      audioElRef.current = null;
+    }
+    analyserRef.current = null;
+    if (!phaseRef.current || phaseRef.current === "done") {
+      setPhaseBoth("idle");
+    } else {
+      setPhaseBoth("idle");
+    }
+    setAudioLevel(Array(30).fill(4));
+    setDispatcherCaption("");
+    setLiveTranscript("");
+  }, [setPhaseBoth]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      if (processorRef.current) processorRef.current.disconnect();
+      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.close();
+      }
+      if (audioCtxRef.current) audioCtxRef.current.close();
+      if (audioElRef.current) audioElRef.current.pause();
+    };
   }, []);
 
   // Resolves when the server sends {type:"done"} or {type:"error"}, or on timeout.
@@ -142,215 +438,28 @@ export default function ReportPage() {
       setTimeout(finish, timeoutMs);
     });
 
-  const startRecording = async () => {
-    if (phase === "thinking") return;
-    if (phase === "done") {
-      resetReport();
-      return;
+  const inCall = ["listening", "thinking", "speaking"].includes(phase);
+
+  const statusLabel = (() => {
+    switch (phase) {
+      case "idle":
+        return "Tap to call the emergency dispatcher";
+      case "listening":
+        return liveTranscript ? "Listening…" : "Listening… speak now";
+      case "thinking":
+        return "Dispatcher is thinking…";
+      case "speaking":
+        return "Dispatcher is speaking…";
+      case "done":
+        return "Report dispatched. Tap to start a new call";
     }
-
-    setPhase("recording");
-    setTranscript("");
-    transcriptRef.current = "";
-    setError(null);
-
-    // Get microphone access
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: { sampleRate: 16000, channelCount: 1 },
-      });
-      streamRef.current = stream;
-
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      // 16 kHz matches Sarvam Saaras' recommended sample rate for PCM input
-      const audioCtx = new AudioContextClass({ sampleRate: 16000 });
-      audioCtxRef.current = audioCtx;
-      const source = audioCtx.createMediaStreamSource(stream);
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 128;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-    } catch (err: any) {
-      // Mic access denied or Audio API error
-      setPhase("idle");
-      setError("Microphone access is required for voice reporting.");
-      return;
-    }
-
-    updateAudioLevels();
-
-    // Connect WebSocket for real-time transcription (Sarvam Saaras v4)
-    try {
-      const ws = new WebSocket(`${WS_BASE}/ws/transcribe`);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        ws.send(
-          JSON.stringify({
-            type: "config",
-            language: language.code,
-            sampleRate: audioCtxRef.current?.sampleRate || 16000,
-          })
-        );
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === "transcript" && data.text) {
-            transcriptRef.current = data.text;
-            setTranscript(data.text);
-          }
-        } catch {
-          // Ignore malformed messages
-        }
-      };
-
-      ws.onerror = () => {
-        console.warn("WebSocket connection failed — live transcription unavailable");
-      };
-
-      // Stream raw PCM audio
-      const processor = audioCtxRef.current!.createScriptProcessor(4096, 1, 1);
-      processorRef.current = processor;
-
-      processor.onaudioprocess = (e) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          const inputData = e.inputBuffer.getChannelData(0);
-          const pcm16 = new Int16Array(inputData.length);
-          for (let i = 0; i < inputData.length; i++) {
-            const s = Math.max(-1, Math.min(1, inputData[i]));
-            pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-          }
-          ws.send(pcm16.buffer);
-        }
-      };
-
-      analyserRef.current!.connect(processor);
-      processor.connect(audioCtxRef.current!.destination);
-    } catch (err: any) {
-      console.error("WebSocket setup error:", err);
-      setError("Voice connection failed. Please try again.");
-      setPhase("idle");
-    }
-  };
-
-  const stopRecording = async () => {
-    // Stop audio capture
-    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-    if (processorRef.current) {
-      processorRef.current.disconnect();
-      processorRef.current = null;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-    }
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      const ws = wsRef.current;
-      ws.send(JSON.stringify({ type: "stop" }));
-      // Wait for Sarvam's final transcript
-      await waitForTranscriptDone(ws, 45000);
-      try {
-        ws.close();
-      } catch {
-        // Already closed
-      }
-    }
-    if (audioCtxRef.current) {
-      audioCtxRef.current.close();
-    }
-
-    setAudioLevel(Array(30).fill(4));
-
-    const finalTranscript = transcriptRef.current.trim();
-    setTranscript("");
-
-    if (!finalTranscript) {
-      setPhase("idle");
-      setError("No speech detected. Tap the mic and try again.");
-      return;
-    }
-
-    // Add the caller's message to the chat
-    const userMsg: Message = { role: "user", text: finalTranscript };
-    const history = [...messages, userMsg];
-    setMessages(history);
-    setPhase("thinking");
-    setError(null);
-
-    try {
-      const response = await fetch(`${API_BASE}/api/converse`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          transcript: finalTranscript,
-          language: language.code,
-          history: messages.map((m) => ({ role: m.role, text: m.text })),
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
-      }
-
-      const data = await response.json();
-      const assistantMsg: Message = {
-        role: "assistant",
-        text: data.reply,
-        audio: data.audio,
-      };
-      const updated = [...history, assistantMsg];
-      setMessages(updated);
-
-      // Speak the dispatcher's reply (Sarvam Bulbul v4 Flash)
-      playAudio(data.audio, updated.length - 1);
-
-      if (data.status === "finalized" && data.incident) {
-        const inc: Incident = data.incident;
-        setResult(inc);
-        setPhase("done");
-      } else {
-        setPhase("idle"); // ready for the caller's next utterance
-      }
-    } catch (err) {
-      console.warn("Converse API unavailable:", err);
-      setPhase("idle");
-      setError(
-        "Could not reach the emergency dispatcher. Please try again."
-      );
-    }
-  };
-
-  useEffect(() => {
-    return () => {
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-      if (processorRef.current) {
-        processorRef.current.disconnect();
-      }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-      }
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.close();
-      }
-      if (audioCtxRef.current) {
-        audioCtxRef.current.close();
-      }
-      if (audioElRef.current) {
-        audioElRef.current.pause();
-      }
-    };
-  }, []);
+  })();
 
   const resetReport = () => {
-    if (audioElRef.current) audioElRef.current.pause();
-    setMessages([]);
-    setTranscript("");
-    transcriptRef.current = "";
+    historyRef.current = [];
     setResult(null);
     setError(null);
-    setPhase("idle");
+    setPhaseBoth("idle");
   };
 
   return (
@@ -367,9 +476,9 @@ export default function ReportPage() {
         >
           <h1 className={styles.title}>Report Emergency</h1>
           <p className={styles.subtitle}>
-            Talk to our AI dispatcher like a phone call. It will ask what
-            happened, where, and who needs help — then dispatch the right
-            force.
+            A live voice call with our AI dispatcher. Just speak naturally —
+            it will ask what happened, where, and who needs help, then
+            dispatch the right force.
           </p>
         </motion.div>
 
@@ -424,97 +533,83 @@ export default function ReportPage() {
 
         {/* Main Area */}
         <div className={styles.mainArea}>
-          {/* Conversation */}
-          <div className={styles.chatContainer}>
-            {messages.length === 0 && !transcript && phase === "idle" && (
-              <div className={styles.chatIntro}>
-                <Bot size={32} />
-                <p>Tap the microphone and describe the emergency in your own words.</p>
-              </div>
-            )}
-
-            <AnimatePresence>
-              {messages.map((msg, i) => (
+          {/* The Agent Orb */}
+          <motion.div
+            className={styles.micContainer}
+            initial={{ opacity: 0, scale: 0.5 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.3, type: "spring", stiffness: 200, damping: 15 }}
+          >
+            <motion.button
+              className={`${styles.micButton} ${phase === "listening" ? styles.recording : ""} ${phase === "speaking" ? styles.agentSpeaking : ""}`}
+              onClick={() => {
+                if (phase === "idle") startCall();
+                else if (phase === "listening") endUtterance(); // manual send
+                else if (phase === "done") resetReport();
+              }}
+              whileTap={{ scale: 0.9 }}
+              whileHover={{ scale: 1.08, boxShadow: "0 0 60px var(--accent-red-glow)" }}
+              transition={{ type: "spring", stiffness: 300 }}
+              aria-label={statusLabel || undefined}
+            >
+              {(phase === "listening" || phase === "thinking" || phase === "speaking") && (
+                <>
+                  <span className={styles.micRing1} />
+                  <span className={styles.micRing2} />
+                  <span className={styles.micRing3} />
+                </>
+              )}
+              {phase === "idle" ? (
+                <Mic size={36} />
+              ) : phase === "done" ? (
                 <motion.div
-                  key={i}
-                  className={`${styles.bubble} ${msg.role === "user" ? styles.bubbleUser : styles.bubbleAssistant}`}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.25 }}
+                  initial={{ scale: 0, rotate: -180 }}
+                  animate={{ scale: 1, rotate: 0 }}
+                  transition={{ type: "spring", stiffness: 200 }}
                 >
-                  <div className={styles.bubbleMeta}>
-                    {msg.role === "assistant" ? (
-                      <Bot size={14} />
-                    ) : (
-                      <Mic size={14} />
-                    )}
-                    <span>{msg.role === "assistant" ? "Dispatcher" : "You"}</span>
-                    {msg.role === "assistant" && msg.audio && (
-                      <button
-                        className={styles.speakerBtn}
-                        onClick={() => playAudio(msg.audio, i)}
-                        title="Replay (Sarvam Bulbul v4)"
-                        aria-label="Replay audio"
-                      >
-                        <Volume2 size={14} className={playingIdx === i ? styles.spinning : undefined} />
-                      </button>
-                    )}
-                  </div>
-                  <p className={styles.bubbleText}>{msg.text}</p>
+                  <CheckCircle2 size={36} />
                 </motion.div>
-              ))}
-            </AnimatePresence>
-
-            {/* Live transcript while recording */}
-            <AnimatePresence>
-              {phase === "recording" && (
+              ) : phase === "listening" ? (
                 <motion.div
-                  className={`${styles.bubble} ${styles.bubbleUser}`}
-                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ scale: [1, 1.15, 1] }}
+                  transition={{ repeat: Infinity, duration: 1 }}
+                >
+                  <Ear size={36} />
+                </motion.div>
+              ) : phase === "speaking" ? (
+                <motion.div
+                  animate={{ scale: [1, 1.12, 1] }}
+                  transition={{ repeat: Infinity, duration: 0.8 }}
+                >
+                  <Bot size={36} />
+                </motion.div>
+              ) : (
+                <Loader2 size={36} className={styles.spinning} />
+              )}
+            </motion.button>
+
+            <p className={styles.micLabel}>{statusLabel}</p>
+
+            {/* End call button */}
+            <AnimatePresence>
+              {inCall && (
+                <motion.button
+                  className={styles.endCallBtn}
+                  onClick={endCall}
+                  initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0 }}
                 >
-                  <div className={styles.bubbleMeta}>
-                    <Mic size={14} />
-                    <span>You</span>
-                    <span className={styles.liveBadge}>listening</span>
-                  </div>
-                  <p className={styles.bubbleText}>
-                    {transcript || "…"}
-                    <span className={styles.cursor}>|</span>
-                  </p>
-                </motion.div>
+                  <PhoneOff size={14} />
+                  <span>End call</span>
+                </motion.button>
               )}
             </AnimatePresence>
+          </motion.div>
 
-            {/* Thinking indicator */}
-            <AnimatePresence>
-              {phase === "thinking" && (
-                <motion.div
-                  className={`${styles.bubble} ${styles.bubbleAssistant}`}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                >
-                  <div className={styles.bubbleMeta}>
-                    <Bot size={14} />
-                    <span>Dispatcher is thinking</span>
-                  </div>
-                  <div className={styles.thinkingDots}>
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <div ref={chatEndRef} />
-          </div>
-
-          {/* Waveform */}
+          {/* Voice waveform (listening + speaking) */}
           <AnimatePresence>
-            {phase === "recording" && (
+            {(phase === "listening" || phase === "speaking") && (
               <motion.div
                 className={styles.waveform}
                 initial={{ opacity: 0 }}
@@ -524,11 +619,52 @@ export default function ReportPage() {
                 {audioLevel.map((h, i) => (
                   <motion.div
                     key={i}
-                    className={styles.waveBar}
-                    animate={{ height: `${h}px` }}
-                    transition={{ duration: 0.1 }}
+                    className={`${styles.waveBar} ${phase === "speaking" ? styles.waveSpeaking : ""}`}
+                    animate={{
+                      height:
+                        phase === "speaking"
+                          ? `${12 + Math.random() * 26}px`
+                          : `${h}px`,
+                    }}
+                    transition={{ duration: 0.12 }}
                   />
                 ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Caption — the single live line of conversation */}
+          <AnimatePresence mode="wait">
+            {(phase === "listening" || phase === "speaking") && (
+              <motion.div
+                key={phase === "listening" ? "listen" : "speak"}
+                className={`glass-card ${styles.captionCard}`}
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.3 }}
+              >
+                <div className={styles.captionHeader}>
+                  {phase === "listening" ? (
+                    <>
+                      <Mic size={14} />
+                      <span>You — live transcript</span>
+                    </>
+                  ) : (
+                    <>
+                      <Bot size={14} />
+                      <span>Dispatcher — speaking</span>
+                    </>
+                  )}
+                </div>
+                <p className={styles.captionText}>
+                  {phase === "listening"
+                    ? liveTranscript || "…"
+                    : dispatcherCaption}
+                  {(phase === "listening" || phase === "speaking") && (
+                    <span className={styles.cursor}>|</span>
+                  )}
+                </p>
               </motion.div>
             )}
           </AnimatePresence>
@@ -548,69 +684,6 @@ export default function ReportPage() {
             )}
           </AnimatePresence>
 
-          {/* Microphone Button */}
-          <motion.div
-            className={styles.micContainer}
-            initial={{ opacity: 0, scale: 0.5 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.3, type: "spring", stiffness: 200, damping: 15 }}
-          >
-            <motion.button
-              className={`${styles.micButton} ${phase === "recording" ? styles.recording : ""}`}
-              onClick={
-                phase === "idle"
-                  ? startRecording
-                  : phase === "recording"
-                    ? stopRecording
-                    : phase === "done"
-                      ? resetReport
-                      : undefined
-              }
-              disabled={phase === "thinking"}
-              whileTap={{ scale: 0.9 }}
-              whileHover={phase !== "thinking" ? { scale: 1.08, boxShadow: "0 0 60px var(--accent-red-glow)" } : undefined}
-              transition={{ type: "spring", stiffness: 300 }}
-            >
-              {phase === "recording" && (
-                <>
-                  <span className={styles.micRing1} />
-                  <span className={styles.micRing2} />
-                  <span className={styles.micRing3} />
-                </>
-              )}
-              {phase === "thinking" ? (
-                <Loader2 size={36} className={styles.spinning} />
-              ) : phase === "done" ? (
-                <motion.div
-                  initial={{ scale: 0, rotate: -180 }}
-                  animate={{ scale: 1, rotate: 0 }}
-                  transition={{ type: "spring", stiffness: 200 }}
-                >
-                  <CheckCircle2 size={36} />
-                </motion.div>
-              ) : phase === "recording" ? (
-                <motion.div
-                  animate={{ scale: [1, 1.15, 1] }}
-                  transition={{ repeat: Infinity, duration: 1 }}
-                >
-                  <MicOff size={36} />
-                </motion.div>
-              ) : (
-                <Mic size={36} />
-              )}
-            </motion.button>
-
-            <p className={styles.micLabel}>
-              {phase === "idle" &&
-                (messages.length === 0
-                  ? "Tap to start the call"
-                  : "Tap to speak your answer")}
-              {phase === "recording" && "Listening... Tap to send"}
-              {phase === "thinking" && "Dispatcher is responding..."}
-              {phase === "done" && "Report dispatched! Tap to start a new call"}
-            </p>
-          </motion.div>
-
           {/* Result */}
           <AnimatePresence>
             {phase === "done" && result && (
@@ -620,28 +693,13 @@ export default function ReportPage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5 }}
               >
-                {/* Success Banner */}
                 <div className={styles.successBanner}>
                   <CheckCircle2 size={20} />
                   <span>
                     Alert dispatched to {result.departments.length} departments
                   </span>
-                  {messages.filter((m) => m.audio).length > 0 && (
-                    <button
-                      className={styles.replayButton}
-                      onClick={() => {
-                        const lastAudio = [...messages].reverse().find((m) => m.audio);
-                        if (lastAudio) playAudio(lastAudio.audio, -1);
-                      }}
-                      title="Replay spoken summary (Sarvam Bulbul v4)"
-                      aria-label="Replay spoken summary"
-                    >
-                      <Volume2 size={16} />
-                    </button>
-                  )}
                 </div>
 
-                {/* Result Cards Grid */}
                 <div className={styles.resultGrid}>
                   {/* Incident Summary */}
                   <motion.div className={`glass-card ${styles.resultCard}`}
@@ -650,18 +708,13 @@ export default function ReportPage() {
                     transition={{ delay: 0.1, duration: 0.4 }}
                   >
                     <h3 className={styles.resultCardTitle}>
-                      <AlertTriangle
-                        size={18}
-                        style={{ color: "var(--accent-amber)" }}
-                      />
+                      <AlertTriangle size={18} style={{ color: "var(--accent-amber)" }} />
                       Incident Classification
                     </h3>
                     <div className={styles.resultFields}>
                       <div className={styles.field}>
                         <span className={styles.fieldLabel}>Type</span>
-                        <span className={styles.fieldValue}>
-                          {result.type}
-                        </span>
+                        <span className={styles.fieldValue}>{result.type}</span>
                       </div>
                       <div className={styles.field}>
                         <span className={styles.fieldLabel}>Severity</span>
@@ -696,10 +749,7 @@ export default function ReportPage() {
                     transition={{ delay: 0.2, duration: 0.4 }}
                   >
                     <h3 className={styles.resultCardTitle}>
-                      <MapPin
-                        size={18}
-                        style={{ color: "var(--accent-green)" }}
-                      />
+                      <MapPin size={18} style={{ color: "var(--accent-green)" }} />
                       Location Reported
                     </h3>
                     <p className={styles.locationText}>{result.location}</p>
@@ -712,10 +762,7 @@ export default function ReportPage() {
                     transition={{ delay: 0.3, duration: 0.4 }}
                   >
                     <h3 className={styles.resultCardTitle}>
-                      <Users
-                        size={18}
-                        style={{ color: "var(--accent-red)" }}
-                      />
+                      <Users size={18} style={{ color: "var(--accent-red)" }} />
                       Casualties
                     </h3>
                     <p className={styles.casualtyText}>{result.casualties}</p>
@@ -724,18 +771,13 @@ export default function ReportPage() {
                   {/* Departments */}
                   <div className={`glass-card ${styles.resultCard} ${styles.deptCard}`}>
                     <h3 className={styles.resultCardTitle}>
-                      <Send
-                        size={18}
-                        style={{ color: "var(--accent-blue)" }}
-                      />
+                      <Send size={18} style={{ color: "var(--accent-blue)" }} />
                       Departments Notified
                     </h3>
                     <div className={styles.deptList}>
                       {result.departments.map((dept, i) => {
-                        const Icon =
-                          departmentIcons[dept] || Shield;
-                        const color =
-                          departmentColors[dept] || "var(--accent-blue)";
+                        const Icon = departmentIcons[dept] || Shield;
+                        const color = departmentColors[dept] || "var(--accent-blue)";
                         return (
                           <motion.div
                             key={i}
@@ -744,10 +786,7 @@ export default function ReportPage() {
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ delay: 0.3 + i * 0.15 }}
                           >
-                            <div
-                              className={styles.deptIcon}
-                              style={{ background: `${color}20`, color }}
-                            >
+                            <div className={styles.deptIcon} style={{ background: `${color}20`, color }}>
                               <Icon size={18} />
                             </div>
                             <span>{dept}</span>
