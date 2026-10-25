@@ -9,6 +9,22 @@ from typing import Optional, Tuple
 USE_MOCK = os.getenv("USE_MOCK", "false").lower() == "true"
 
 
+# Generic phrases that must never be geocoded ("a man collapsed at the bus stop"
+# must not resolve to a random "Bus Stop" place — better to report unknown)
+_GENERIC_LOCATIONS = {
+    "bus stop", "the bus stop", "bus stand", "the bus stand", "the mall", "mall",
+    "home", "my home", "here", "there", "the road", "the street", "the park",
+    "the hospital", "hospital", "the market", "market", "the school", "school",
+    "the station", "railway station", "the railway station", "the building",
+    "the office", "the shop", "nearby", "the area", "the highway", "highway",
+    "the mall near", "a bus stop",
+}
+
+
+def _is_generic_location(location_text: str) -> bool:
+    return (location_text or "").strip().lower().rstrip(".,") in _GENERIC_LOCATIONS
+
+
 async def geocode(
     location_text: str,
     bias_near: Optional[Tuple[float, float]] = None,
@@ -29,7 +45,7 @@ async def geocode(
         return await _mock_forward_geocode(location_text)
 
     clean = (location_text or "").strip()
-    if not clean:
+    if not clean or _is_generic_location(clean):
         return None
 
     client_kwargs = {"region_name": os.getenv("AWS_REGION", "ap-south-1")}
@@ -39,7 +55,12 @@ async def geocode(
         import boto3
 
         client = boto3.client("location", **client_kwargs)
-        kwargs = {"IndexName": index_name, "Text": text, "MaxResults": 1}
+        kwargs = {
+            "IndexName": index_name,
+            "Text": text,
+            "MaxResults": 1,
+            "FilterCountries": ["IND"],  # CivicAlert is an India-wide service
+        }
         if bias_near:
             # Bias toward the reporter's area: ~100km box around them
             kwargs["BiasPosition"] = [bias_near[1], bias_near[0]]  # [lng, lat]
@@ -53,11 +74,11 @@ async def geocode(
         return None
 
     try:
-        # 1st attempt: as spoken / typed
+        # 1st attempt: as spoken / typed (restricted to India)
         coords = _search(clean)
         if coords:
             return coords
-        # 2nd attempt: local names are often ambiguous — anchor to India
+        # 2nd attempt: anchor explicitly to India for ambiguous local names
         if "india" not in clean.lower():
             coords = _search(f"{clean}, India")
             if coords:

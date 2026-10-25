@@ -145,5 +145,247 @@
     "status": "active",
     "timestamp": "2026-03-23T14:50:24.767154Z",
     "language": "en-IN"
+  },
+  "INC-9FBD1B19": {
+    "id": "INC-9FBD1B19",
+    "type": "Medical Emergency",
+    "severity": "medium",
+    "departments": [
+      "Medical Emergency"
+    ],
+    "location": "Unknown location",
+    "coordinates": null,
+    "casualties": "Unknown",
+    "summary": "A man collapsed unconscious at the bus stop, he is not breathing properly",
+    "transcript": "A man collapsed unconscious at the bus stop, he is not breathing properly",
+    "confidence": 40.0,
+    "status": "active",
+    "timestamp": "2026-10-25T10:54:15.342779Z",
+    "language": "en-IN"
+  },
+  "INC-994037D6": {
+    "id": "INC-994037D6",
+    "type": "Fire Emergency",
+    "severity": "medium",
+    "departments": [
+      "Fire Department",
+      "Medical Emergency"
+    ],
+    "location": "Sector 15, Kanpur, Uttar Pradesh 208002",
+    "coordinates": {
+      "lat": 26.4499,
+      "lng": 80.3319
+    },
+    "casualties": "Unknown",
+    "summary": "There is a gas leak in the basement of the mall near Rawatpur, three shoppers have fainted",
+    "transcript": "There is a gas leak in the basement of the mall near Rawatpur, three shoppers have fainted",
+    "confidence": 40.0,
+    "status": "active",
+    "timestamp": "2026-10-25T10:54:17.901835Z",
+    "language": "en-IN"
+  },
+  "INC-A091A8EE": {
+    "id": "INC-A091A8EE",
+    "type": "Medical Emergency",
+    "severity": "medium",
+    "departments": [
+      "Medical Emergency"
+    ],
+    "location": "26.51060, 80.23340",
+    "coordinates": {
+      "lat": 26.5106,
+      "lng": 80.2334
+    },
+    "casualties": "Unknown",
+    "summary": "A student fell from the stairs in the academic block and is bleeding, need ambulance at IIT Kanpur campus",
+    "transcript": "A student fell from the stairs in the academic block and is bleeding, need ambulance at IIT Kanpur campus",
+    "confidence": 40.0,
+    "status": "active",
+    "timestamp": "2026-10-25T10:54:54.592923Z",
+    "language": "en-IN"
+  },
+  "INC-85C8F8F1": {
+    "id": "INC-85C8F8F1",
+    "type": "Medical Emergency",
+    "severity": "medium",
+    "departments": [
+      "Medical Emergency"
+    ],
+    "location": "DR Main Road, Kalyanpur, Kalyanpur Kanpur, Kanpur, Uttar Pradesh, 208016, IND",
+    "coordinates": {
+      "lat": 26.5106,
+      "lng": 80.2334
+    },
+    "casualties": "Unknown",
+    "summary": "A student fell from the stairs in the academic block and is bleeding heavily, need ambulance at IIT Kanpur campus",
+    "transcript": "A student fell from the stairs in the academic block and is bleeding heavily, need ambulance at IIT Kanpur campus",
+    "confidence": 40.0,
+    "status": "active",
+    "timestamp": "2026-10-25T10:55:14.319490Z",
+    "language": "en-IN"
+  },
+  "INC-1C889010": {
+    "id": "INC-1C889010",
+    "type": "Fire Emergency",
+    "severity": "medium",
+    "departments": [
+      "Fire Department",
+      "Medical Emergency"
+    ],
+    "location": "Unknown location",
+    "coordinates": null,
+    "casualties": "Unknown",
+    "summary": "Massive fire at the shoe factory in Agra, workers are trapped inside and smoke is everywhere",
+    "transcript": "Massive fire at the shoe factory in Agra, workers are trapped inside and smoke is everywhere",
+    "confidence": 40.0,
+    "status": "active",
+    "timestamp": "2026-10-25T10:55:19.174103Z",
+    "language": "en-IN"
+  },
+  "INC-E689BB48": {
+    "id": "INC-E689BB48",
+    "type": "Fire Emergency",
+    "severity": "medium",
+    "departments": [
+      "Fire Department",
+      "Medical Emergency"
+    ],
+    "location": "Bank Of Baroda, Fatehabad Road, Rakabganj, Agra, Uttar Pradesh, 282001, IND",
+    "coordinates": {
+      "lat": 27.1677246,
+      "lng": 78.0358887
+    },
+    "casualties": "Unknown",
+    "summary": "Massive fire at the shoe factory in Agra, workers are trapped inside and smoke is everywhere",
+    "transcript": "Massive fire at the shoe factory in Agra, workers are trapped inside and smoke is everywhere",
+    "confidence": 40.0,
+    "status": "active",
+    "timestamp": "2026-10-25T10:55:37.567879Z",
+    "language": "en-IN"
+  },
+  "INC-580954CE": {
+    "id": "INC-580954CE",
+    "type": "Fire Emergency",
+    "severity": "medium",
+    "departments": [
+      "Fire Department",
+      "Medical Emergency"
+    ],
+    "location": "R\u0101watpur, K\u0101npur, Uttar Pradesh, IND",
+    "coordinates": {
+      "lat": 26.48337,
+      "lng": 80.29817
+    },
+    "casualties": "Unknown",
+    "summary": "There is a gas leak in the basement of the mall near Rawatpur, three shoppers have fainted and one is not breathing properly",
+    "transcript": "There is a gas leak in the basement of the mall near Rawatpur, three shoppers have fainted and one is not breathing properly",
+    "confidence": 40.0,
+    "status": "active",
+    "timestamp": "2026-10-25T10:58:09.861584Z",
+    "language": "en-IN"
+  },
+  "INC-4ADDA58C": {
+    "id": "INC-4ADDA58C",
+    "type": "Gas Leak",
+    "severity": "critical",
+    "departments": [
+      "Fire Department",
+      "Medical Emergency"
+    ],
+    "location": "R\u0101watpur, K\u0101npur, Uttar Pradesh, IND",
+    "coordinates": {
+      "lat": 26.48337,
+      "lng": 80.29817
+    },
+    "casualties": "Three shoppers fainted, one not breathing properly",
+    "summary": "A gas leak in the basement of a mall near Rawatpur has caused three shoppers to faint and one to have difficulty breathing. Fire and medical emergency services are required.",
+    "transcript": "There is a gas leak in the basement of the mall near Rawatpur, three shoppers have fainted and one is not breathing properly",
+    "confidence": 0.95,
+    "status": "active",
+    "timestamp": "2026-10-25T10:58:24.983175Z",
+    "language": "en-IN"
+  },
+  "INC-B0AD61F1": {
+    "id": "INC-B0AD61F1",
+    "type": "Robbery",
+    "severity": "high",
+    "departments": [
+      "Police",
+      "Fire Department",
+      "Medical Emergency"
+    ],
+    "location": "583277, IND",
+    "coordinates": {
+      "lat": 15.649521,
+      "lng": 76.266889
+    },
+    "casualties": "None reported",
+    "summary": "Armed men are robbing a jewelry shop in Chunniganj market and have fired shots in the air. Police and medical emergency services should be notified.",
+    "transcript": "Armed men are robbing the jewelry shop in Chunniganj market, they fired shots in the air",
+    "confidence": 95.0,
+    "status": "active",
+    "timestamp": "2026-10-25T10:58:39.888111Z",
+    "language": "en-IN"
+  },
+  "INC-EDC5A470": {
+    "id": "INC-EDC5A470",
+    "type": "Robbery",
+    "severity": "high",
+    "departments": [
+      "Police",
+      "Medical Emergency"
+    ],
+    "location": "583277, IND",
+    "coordinates": {
+      "lat": 15.649521,
+      "lng": 76.266889
+    },
+    "casualties": "None reported",
+    "summary": "Armed men are robbing a jewelry shop in Chunniganj market and have fired shots in the air. Police and Medical Emergency are needed.",
+    "transcript": "Armed men are robbing the jewelry shop in Chunniganj market, they fired shots in the air",
+    "confidence": 95.0,
+    "status": "active",
+    "timestamp": "2026-10-25T10:59:23.176787Z",
+    "language": "en-IN"
+  },
+  "INC-74CBD1BF": {
+    "id": "INC-74CBD1BF",
+    "type": "Flooding",
+    "severity": "high",
+    "departments": [
+      "Disaster Response"
+    ],
+    "location": "ICICI Bank ATM, Maharaja Agrasen Marg, Kidwai Nagar, South East Delhi, Delhi, 110023, IND",
+    "coordinates": {
+      "lat": 28.5733496,
+      "lng": 77.2089651
+    },
+    "casualties": "None reported",
+    "summary": "Heavy flood water has entered houses in Kidwai Nagar, requiring immediate evacuation. No casualties reported.",
+    "transcript": "Heavy flood water has entered the houses in Kidwai Nagar, families need immediate evacuation",
+    "confidence": 95.0,
+    "status": "active",
+    "timestamp": "2026-10-25T10:59:26.189925Z",
+    "language": "en-IN"
+  },
+  "INC-DF45ABF3": {
+    "id": "INC-DF45ABF3",
+    "type": "Medical Emergency",
+    "severity": "high",
+    "departments": [
+      "Medical Emergency"
+    ],
+    "location": "Campus, Govind Nagar Road, Govind Nagar, Kanpur, Uttar Pradesh, 208006, IND",
+    "coordinates": {
+      "lat": 26.449751,
+      "lng": 80.300778
+    },
+    "casualties": "One student reported unconscious",
+    "summary": "A student has fallen unconscious at the gate of IIT Kanpur campus. Medical Emergency department should be dispatched immediately.",
+    "transcript": "A student fell unconscious at the gate of IIT Kanpur campus",
+    "confidence": 95.0,
+    "status": "active",
+    "timestamp": "2026-10-25T11:00:24.587773Z",
+    "language": "en-IN"
   }
 }
