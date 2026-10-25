@@ -70,6 +70,7 @@ export default function ReportPage() {
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioPlaying, setAudioPlaying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -91,7 +92,7 @@ export default function ReportPage() {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        () => setCoords({ lat: 26.5106, lng: 80.2334 }), // Fallback to Kanpur
+        () => setCoords(null), // no fake fallback location — report honestly
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
     }
@@ -119,6 +120,7 @@ export default function ReportPage() {
     setTranscript("");
     transcriptRef.current = "";
     setResult(null);
+    setError(null);
 
     // Get microphone access
     let stream: MediaStream;
@@ -287,10 +289,15 @@ export default function ReportPage() {
 
     setAudioLevel(Array(30).fill(4));
     setPhase("processing");
+    setError(null);
 
-    // Get the current transcript text (final transcript from Sarvam preferred)
-    const currentTranscript =
-      transcriptRef.current || transcript || "Emergency report submitted via voice";
+    // Final transcript from Sarvam — if nothing was detected, don't file a fake report
+    const currentTranscript = transcriptRef.current || transcript;
+    if (!currentTranscript.trim()) {
+      setPhase("idle");
+      setError("No speech detected. Tap the mic and try speaking again.");
+      return;
+    }
 
     // Step 1: Transcribing (already done via streaming)
     setProcessingStep(0);
@@ -335,26 +342,13 @@ export default function ReportPage() {
         throw new Error(`API returned ${response.status}`);
       }
     } catch (err) {
-      // Backend unavailable — generate fallback result
-      console.warn("Backend API unavailable, using fallback result:", err);
-
-      setProcessingStep(2);
-      await new Promise((r) => setTimeout(r, 600));
-      setProcessingStep(3);
-      await new Promise((r) => setTimeout(r, 600));
-
-      triage = {
-        incident_type: "General Emergency",
-        severity: "medium",
-        location: coords
-          ? `${coords.lat.toFixed(4)}° N, ${coords.lng.toFixed(4)}° E`
-          : "Location unavailable",
-        casualties: "Unknown",
-        departments: ["Police"],
-        summary: currentTranscript,
-        confidence: 70,
-      };
-      setResult(triage);
+      // Backend unavailable — show an honest error instead of a fake dispatch
+      console.warn("Backend API unavailable:", err);
+      setPhase("idle");
+      setError(
+        "Report could not be dispatched — the emergency service is unreachable. Please try again."
+      );
+      return;
     }
 
     setPhase("done");
@@ -399,6 +393,7 @@ export default function ReportPage() {
     transcriptRef.current = "";
     setResult(null);
     setProcessingStep(0);
+    setError(null);
   };
 
   return (
@@ -571,6 +566,21 @@ export default function ReportPage() {
                     <span className={styles.cursor}>|</span>
                   )}
                 </p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Error Banner */}
+          <AnimatePresence>
+            {error && (
+              <motion.div
+                className={`glass-card ${styles.errorBanner}`}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+              >
+                <AlertTriangle size={20} />
+                <span>{error}</span>
               </motion.div>
             )}
           </AnimatePresence>

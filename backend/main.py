@@ -56,7 +56,7 @@ class Incident(BaseModel):
     severity: str
     departments: List[str]
     location: str
-    coordinates: Coordinates
+    coordinates: Optional[Coordinates] = None  # None when no GPS and none extracted
     casualties: str
     summary: str
     transcript: str
@@ -97,24 +97,29 @@ async def report_incident(report: IncidentReport):
     # Step 1: Analyze with Bedrock
     analysis = await analyze_incident(transcript)
 
-    # Step 2: Determine coordinates
+    # Step 2: Determine coordinates (honest — never fabricate a location)
     coords = None
-    
-    # Priority 1: Use location extracted from transcript
+
+    # Priority 1: Use location extracted from the transcript, biased toward
+    # the reporter's own GPS position for better local accuracy
     if analysis.get("location_extracted"):
-        geocoded = await geocode(analysis["location_extracted"])
+        geocoded = await geocode(
+            analysis["location_extracted"], bias_near=(
+                (report.coordinates.lat, report.coordinates.lng)
+                if report.coordinates else None
+            )
+        )
         if geocoded:
             coords = Coordinates(lat=geocoded[0], lng=geocoded[1])
-    
-    # Priority 2: Use coordinates provided by user
+
+    # Priority 2: Use coordinates provided by the user's device
     if not coords and report.coordinates:
         coords = report.coordinates
-    
-    # Priority 3: Fallback to Kanpur (default location)
-    if not coords:
-        coords = Coordinates(lat=26.4499, lng=80.3319)
-    
-    location = await reverse_geocode(coords.lat, coords.lng)
+
+    # No placeholder fallback — if we don't know where it is, say so
+    location = (
+        await reverse_geocode(coords.lat, coords.lng) if coords else "Unknown location"
+    )
 
     # Step 3: Build incident
     incident_id = f"INC-{str(uuid.uuid4())[:8].upper()}"

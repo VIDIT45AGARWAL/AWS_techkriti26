@@ -5,9 +5,90 @@ Supports AWS Bedrock and Anthropic API.
 import os
 import json
 import asyncio
+import re
 
 USE_MOCK = os.getenv("USE_MOCK", "false").lower() == "true"
 USE_ANTHROPIC_API = os.getenv("USE_ANTHROPIC_API", "false").lower() == "true"
+
+# ─── Department routing rules ───
+# Canonical department names (must match SNS topic mapping)
+CANONICAL_DEPARTMENTS = ["Police", "Fire Department", "Medical Emergency", "Disaster Response"]
+
+# Signals that REQUIRE a department to be dispatched (matched against the
+# transcript, incident type and casualty notes, case-insensitive)
+_DEPT_RULES = [
+    ("Fire Department", [
+        "fire", "flame", "smoke", "burn", "gas leak", "gas cylinder", "explosion",
+        "blast", "electrocut", "short circuit", "lpg", "stove", "chemical spill",
+        "toxic spill", "hazardous spill", "आग", "धुआं", "आग लगी",
+    ]),
+    ("Medical Emergency", [
+        "injur", "trapped", "unconscious", "faint", "bleed", "heart attack",
+        "stroke", "chok", "casualt", "wound", "fracture", "died", "dead", "death",
+        "ambulance", "hospital", "suffocat", "difficulty breathing", "collapsed man",
+        "collapsed woman", "collapsed person", "pregnan",
+    ]),
+    ("Police", [
+        "theft", "robber", "steal", "stabbing", "shooting", "assault", "violence",
+        "riot", "accident", "crash", "collision", "kidnap", "murder", "suspicious",
+        "weapon", "crime", "fight", "drunk driving", "hit and run", "traffic",
+    ]),
+    ("Disaster Response", [
+        "flood", "earthquake", "cyclone", "landslide", "tsunami", "evacuat",
+        "chemical spill", "chemical leak", "hazard", "biohazard", "building collapse",
+        "structure collapse", "bridge collapse", "dam", "disaster", "storm surge",
+        "बाढ़", "भूकंप", "gas leak into",
+    ]),
+]
+
+
+def _normalize_department(name: str) -> str | None:
+    """Map a free-form department name to a canonical one (or None)."""
+    n = (name or "").lower().strip()
+    if not n:
+        return None
+    if "fire" in n:
+        return "Fire Department"
+    if any(k in n for k in ("medical", "ambulance", "health", "ems", "hospital")):
+        return "Medical Emergency"
+    if any(k in n for k in ("police", "law enforcement", "cop")):
+        return "Police"
+    if any(k in n for k in ("disaster", "ndrf", "rescue", "relief", "sdrf")):
+        return "Disaster Response"
+    return None
+
+
+def _enforce_department_rules(analysis: dict, transcript: str) -> list:
+    """
+    Ensure the correct force is dispatched for the correct emergency.
+
+    Normalizes the AI's department list to canonical names and adds any
+    department whose signals (keywords) appear in the transcript, incident
+    type or casualty notes — so a gas leak can never dispatch without the
+    Fire Department, and trapped/injured people always get Medical.
+    """
+    departments: list = []
+    for d in analysis.get("departments") or []:
+        canonical = _normalize_department(d) if isinstance(d, str) else None
+        if canonical and canonical not in departments:
+            departments.append(canonical)
+
+    # Signal pool: transcript + incident type + casualties
+    signals = " ".join([
+        transcript or "",
+        str(analysis.get("incident_type") or ""),
+        str(analysis.get("casualties") or ""),
+    ]).lower()
+
+    for dept, keywords in _DEPT_RULES:
+        if any(k in signals for k in keywords) and dept not in departments:
+            departments.append(dept)
+
+    # Canonical ordering, and never dispatch to nobody
+    departments = [d for d in CANONICAL_DEPARTMENTS if d in departments]
+    if not departments:
+        departments = ["Police"]  # general emergency responder (112 equivalent)
+    return departments
 
 
 async def analyze_incident(transcript: str) -> dict:
@@ -28,16 +109,20 @@ async def analyze_incident(transcript: str) -> dict:
     if USE_MOCK:
         return await _mock_analyze(transcript)
 
-    # Try real AWS/Anthropic services; fall back to mock if they fail
+    # Try real AWS/Anthropic services; fall back to keyword rules if they fail
     try:
         if USE_ANTHROPIC_API:
-            return await _analyze_with_anthropic(transcript)
+            analysis = await _analyze_with_anthropic(transcript)
         else:
-            return await _analyze_with_bedrock(transcript)
+            analysis = await _analyze_with_bedrock(transcript)
     except Exception as e:
         print(f"[WARNING] AI analysis failed ({type(e).__name__}: {e}). "
               f"Falling back to keyword-based analysis.")
-        return await _mock_analyze(transcript)
+        return await _keyword_fallback(transcript)
+
+    # Guarantee the correct force is dispatched for the correct emergency
+    analysis["departments"] = _enforce_department_rules(analysis, transcript)
+    return analysis
 
 
 async def _analyze_with_anthropic(transcript: str) -> dict:
@@ -107,11 +192,13 @@ IMPORTANT: Extract location information from the report if mentioned. Look for:
 - City/district names
 - Any geographical references
 
-Reason through which departments are needed based on:
-- Type of emergency (fire needs Fire Department, medical needs Medical Emergency, crime needs Police)
-- Severity level (critical incidents may need multiple departments)
-- Specific hazards mentioned (gas leaks need Fire Department, injuries need Medical Emergency)
-- Scale of incident (large-scale disasters need Disaster Response)
+DEPARTMENT DISPATCH MATRIX (MANDATORY — choose every department that applies):
+- Fire, smoke, burns, gas leak, LPG cylinder, explosion, electrocution, short circuit → Fire Department
+- ANY injury, trapped people, unconsciousness, bleeding, fainting, difficulty breathing, pregnancy, death → Medical Emergency
+- Crime (theft, robbery, assault, stabbing, shooting, violence, kidnapping), road accidents, hit-and-run, traffic hazards, suspicious activity → Police
+- Flood, earthquake, cyclone, landslide, building/bridge collapse, chemical spill, biohazard, large-scale evacuation → Disaster Response
+- Large-scale or multi-hazard incidents often need MULTIPLE departments — include all that apply.
+- NEVER leave "departments" empty.
 
 Return a JSON object with these exact fields:
 {{
@@ -154,6 +241,59 @@ Return ONLY valid JSON, no other text."""
 
     parsed = json.loads(response_text)
     return parsed
+
+
+def _extract_location_fallback(transcript: str) -> str | None:
+    """
+    Best-effort location extraction via regex when the AI service is down.
+    Looks for 'at/in/near <Place>' patterns; returns None when nothing matches.
+    """
+    if not transcript:
+        return None
+    match = re.search(
+        r"\b(?:at|in|near|outside)\s+((?:[A-Z][\w’'-]*\s*(?:,|of|near|road|street|nagar|colony|sector|market)?\s*){1,5})",
+        transcript,
+    )
+    if not match:
+        return None
+    location = match.group(1).strip().rstrip(",.")
+    # Require at least one properly capitalized word to avoid grabbing noise
+    words = [w for w in location.split() if w and not w.islower()]
+    return " ".join(words) if words else None
+
+
+async def _keyword_fallback(transcript: str) -> dict:
+    """
+    Honest keyword-based classification used when the AI service fails.
+    Only derives information actually present in the transcript — no
+    invented casualties, locations or summaries.
+    """
+    text = (transcript or "").lower()
+
+    if any(k in text for k in ("fire", "smoke", "burn", "gas leak", "explosion", "आग", "धुआं")):
+        incident_type = "Fire Emergency"
+    elif any(k in text for k in ("flood", "earthquake", "cyclone", "landslide", "बाढ़", "भूकंप")):
+        incident_type = "Natural Disaster"
+    elif any(k in text for k in ("accident", "crash", "collision")):
+        incident_type = "Road Accident"
+    elif any(k in text for k in ("theft", "robber", "assault", "stabbing", "shooting")):
+        incident_type = "Crime Report"
+    elif any(k in text for k in ("injur", "unconscious", "bleed", "faint", "heart attack")):
+        incident_type = "Medical Emergency"
+    else:
+        incident_type = "General Emergency"
+
+    analysis = {
+        "incident_type": incident_type,
+        "severity": "medium",
+        "casualties": "Unknown",
+        "departments": [],
+        "location_extracted": _extract_location_fallback(transcript),
+        "summary": transcript[:500],
+        "confidence": 40,
+    }
+    analysis["departments"] = _enforce_department_rules(analysis, transcript)
+    return analysis
 
 
 async def _mock_analyze(transcript: str) -> dict:

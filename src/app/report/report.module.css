@@ -303,6 +303,20 @@
   transform: scale(1.08);
 }
 
+.errorBanner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 24px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-md);
+  color: #fca5a5;
+  font-weight: 500;
+  font-size: 0.95rem;
+}
+
 .resultGrid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

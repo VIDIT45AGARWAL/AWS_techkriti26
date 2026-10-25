@@ -9,12 +9,18 @@ from typing import Optional, Tuple
 USE_MOCK = os.getenv("USE_MOCK", "false").lower() == "true"
 
 
-async def geocode(location_text: str) -> Optional[Tuple[float, float]]:
+async def geocode(
+    location_text: str,
+    bias_near: Optional[Tuple[float, float]] = None,
+) -> Optional[Tuple[float, float]]:
     """
     Convert location text to GPS coordinates.
 
     Args:
         location_text: Human-readable location (e.g., "Sector 15, Kanpur")
+        bias_near: Optional (lat, lng) of the reporter, used to bias the
+            search toward the area the user is actually in (improves
+            accuracy for ambiguous local names like "Sector 15").
 
     Returns:
         Tuple of (lat, lng) or None if not found
@@ -22,29 +28,44 @@ async def geocode(location_text: str) -> Optional[Tuple[float, float]]:
     if USE_MOCK:
         return await _mock_forward_geocode(location_text)
 
-    try:
+    clean = (location_text or "").strip()
+    if not clean:
+        return None
+
+    client_kwargs = {"region_name": os.getenv("AWS_REGION", "ap-south-1")}
+    index_name = os.getenv("LOCATION_INDEX_NAME", "civic-alert-places-prod")
+
+    def _search(text: str) -> Optional[Tuple[float, float]]:
         import boto3
 
-        client = boto3.client("location", region_name=os.getenv("AWS_REGION", "ap-south-1"))
-
-        response = client.search_place_index_for_text(
-            IndexName=os.getenv("LOCATION_INDEX_NAME", "civic-alert-places"),
-            Text=location_text,
-            MaxResults=1,
-        )
-
+        client = boto3.client("location", **client_kwargs)
+        kwargs = {"IndexName": index_name, "Text": text, "MaxResults": 1}
+        if bias_near:
+            # Bias toward the reporter's area: ~100km box around them
+            kwargs["BiasPosition"] = [bias_near[1], bias_near[0]]  # [lng, lat]
+        response = client.search_place_index_for_text(**kwargs)
         results = response.get("Results", [])
         if results:
             place = results[0].get("Place", {})
-            geometry = place.get("Geometry", {})
-            point = geometry.get("Point", [])
+            point = place.get("Geometry", {}).get("Point", [])
             if len(point) == 2:
                 return (point[1], point[0])  # Convert [lng, lat] to (lat, lng)
+        return None
+
+    try:
+        # 1st attempt: as spoken / typed
+        coords = _search(clean)
+        if coords:
+            return coords
+        # 2nd attempt: local names are often ambiguous — anchor to India
+        if "india" not in clean.lower():
+            coords = _search(f"{clean}, India")
+            if coords:
+                return coords
+        return None
     except Exception as e:
         print(f"AWS Location Geocoding Error: {e}")
         return None
-
-    return None
 
 
 async def reverse_geocode(lat: float, lng: float) -> str:
@@ -68,7 +89,7 @@ async def reverse_geocode(lat: float, lng: float) -> str:
         client = boto3.client("location", region_name=os.getenv("AWS_REGION", "ap-south-1"))
 
         response = client.search_place_index_for_position(
-            IndexName=os.getenv("LOCATION_INDEX_NAME", "civic-alert-places"),
+            IndexName=os.getenv("LOCATION_INDEX_NAME", "civic-alert-places-prod"),
             Position=[lng, lat],  # Note: AWS uses [lng, lat] order
             MaxResults=1,
         )
@@ -76,12 +97,14 @@ async def reverse_geocode(lat: float, lng: float) -> str:
         results = response.get("Results", [])
         if results:
             place = results[0].get("Place", {})
-            return place.get("Label", f"{lat}, {lng}")
+            label = place.get("Label")
+            if label:
+                return label
     except Exception as e:
-        print(f"AWS Location Error: {e}. Falling back to mock geocoding.")
-        return await _mock_geocode(lat, lng)
+        print(f"AWS Location reverse geocoding error: {e}")
 
-    return f"{lat}, {lng}"
+    # Honest fallback — raw coordinates, never a fabricated address
+    return f"{lat:.5f}, {lng:.5f}"
 
 
 async def _mock_forward_geocode(location_text: str) -> Optional[Tuple[float, float]]:
