@@ -1,43 +1,35 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import {
-  Mic,
-  Languages,
-  MapPin,
-  AlertTriangle,
-  Users,
-  Shield,
-  Flame,
-  Heart,
-  CloudLightning,
-  CheckCircle2,
-  Loader2,
+  AudioLines,
+  Check,
   ChevronDown,
-  Send,
+  Mic,
   PhoneOff,
-  Ear,
-  Bot,
+  Square,
 } from "lucide-react";
-import styles from "./report.module.css";
+
+import { SiteFooter } from "@/components/site-footer";
+import { AGENCIES } from "@/lib/agencyConfig";
+import { SEVERITY_LABEL, SEVERITY_TONE, TONE_BG, TONE_TEXT } from "@/lib/tone";
 
 const languages = [
-  { code: "en-IN", label: "English", flag: "🇬🇧" },
-  { code: "hi-IN", label: "हिन्दी", flag: "🇮🇳" },
-  { code: "ta-IN", label: "தமிழ்", flag: "🇮🇳" },
-  { code: "te-IN", label: "తెలుగు", flag: "🇮🇳" },
-  { code: "bn-IN", label: "বাংলা", flag: "🇮🇳" },
-  { code: "mr-IN", label: "मराठी", flag: "🇮🇳" },
+  { code: "en-IN", label: "English" },
+  { code: "hi-IN", label: "हिन्दी" },
+  { code: "ta-IN", label: "தமிழ்" },
+  { code: "te-IN", label: "తెలుగు" },
+  { code: "bn-IN", label: "বাংলা" },
+  { code: "mr-IN", label: "मराठी" },
 ];
 
 /*
  * Pure conversational agent — a voice call, not a chat.
  *
- *   tap to call → agent listens (Sarvam Saaras v4 streams the transcript)
- *   → you stop speaking (auto-detected silence or tap) → agent thinks
- *   → agent speaks its reply aloud (Sarvam Bulbul v4) with a live caption
- *   → agent automatically resumes listening for your next utterance
+ *   press to call → agent listens (Sarvam Saaras streams the transcript)
+ *   → silence or press ends the turn → agent thinks
+ *   → agent speaks its reply aloud (Sarvam Bulbul) with a live caption
+ *   → agent automatically resumes listening for the next utterance
  *   → when it has everything, it files the report and ends the call.
  */
 type Phase =
@@ -72,24 +64,11 @@ const VAD_THRESHOLD = 0.028; // RMS above this counts as speech
 const VAD_SILENCE_MS = 1500; // silence that ends an utterance
 const VAD_MIN_SPEECH_MS = 350; // ignore blips shorter than this
 
-const departmentIcons: Record<string, React.ElementType> = {
-  Police: Shield,
-  "Fire Department": Flame,
-  "Medical Emergency": Heart,
-  "Disaster Response": CloudLightning,
-};
-
-const departmentColors: Record<string, string> = {
-  Police: "var(--accent-blue)",
-  "Fire Department": "var(--accent-red)",
-  "Medical Emergency": "var(--accent-green)",
-  "Disaster Response": "var(--accent-amber)",
-};
+const DEPT_TONE = new Map(AGENCIES.map((agency) => [agency.apiName, agency.tone]));
 
 export default function ReportPage() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [language, setLanguage] = useState(languages[0]);
-  const [langOpen, setLangOpen] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState(""); // caption while listening
   const [dispatcherCaption, setDispatcherCaption] = useState(""); // caption while speaking
   const [result, setResult] = useState<Incident | null>(null);
@@ -118,6 +97,15 @@ export default function ReportPage() {
     setPhase(p);
   }, []);
 
+  // While the dispatcher speaks, the bars wander gently with its voice.
+  useEffect(() => {
+    if (phase !== "speaking") return;
+    const interval = setInterval(() => {
+      setAudioLevel(Array.from({ length: 30 }, () => 10 + Math.random() * 30));
+    }, 110);
+    return () => clearInterval(interval);
+  }, [phase]);
+
   // ─── Speech playback (dispatcher voice) ───
 
   const speakReply = useCallback(
@@ -133,10 +121,10 @@ export default function ReportPage() {
       el.src = audioDataUrl;
       el.play().catch(() => onEnded());
     },
-    []
+    [],
   );
 
-  // ─── Listening: mic → Sarvam Saaras v4 ───
+  // ─── Listening: mic → Sarvam Saaras ───
 
   const openTranscriptionSocket = useCallback((): WebSocket | null => {
     try {
@@ -148,7 +136,7 @@ export default function ReportPage() {
             type: "config",
             language: language.code,
             sampleRate: audioCtxRef.current?.sampleRate || 16000,
-          })
+          }),
         );
       };
       ws.onmessage = (event) => {
@@ -195,7 +183,7 @@ export default function ReportPage() {
         Array.from({ length: 30 }, (_, i) => {
           const idx = Math.floor((i / 30) * freq.length);
           return Math.max(4, (freq[idx] / 255) * 50);
-        })
+        }),
       );
 
       const now = performance.now();
@@ -210,8 +198,7 @@ export default function ReportPage() {
 
       // Utterance ended: spoke long enough, then went silent
       const spokeEnough =
-        vadHasVoiceRef.current &&
-        now - vadSpeechStartRef.current! >= VAD_MIN_SPEECH_MS;
+        vadHasVoiceRef.current && now - vadSpeechStartRef.current! >= VAD_MIN_SPEECH_MS;
       const wentSilent = now - vadLastVoiceRef.current >= VAD_SILENCE_MS;
 
       if (
@@ -226,7 +213,6 @@ export default function ReportPage() {
       }
     }
     animFrameRef.current = requestAnimationFrame(listenLoop);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ─── Call lifecycle ───
@@ -249,7 +235,8 @@ export default function ReportPage() {
       streamRef.current = stream;
 
       const AudioContextClass =
-        window.AudioContext || (window as any).webkitAudioContext;
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const audioCtx = new AudioContextClass({ sampleRate: 16000 });
       audioCtxRef.current = audioCtx;
       const source = audioCtx.createMediaStreamSource(stream);
@@ -392,11 +379,7 @@ export default function ReportPage() {
       audioElRef.current = null;
     }
     analyserRef.current = null;
-    if (!phaseRef.current || phaseRef.current === "done") {
-      setPhaseBoth("idle");
-    } else {
-      setPhaseBoth("idle");
-    }
+    setPhaseBoth("idle");
     setAudioLevel(Array(30).fill(4));
     setDispatcherCaption("");
     setLiveTranscript("");
@@ -443,15 +426,15 @@ export default function ReportPage() {
   const statusLabel = (() => {
     switch (phase) {
       case "idle":
-        return "Tap to call the emergency dispatcher";
+        return "Press to call the emergency dispatcher.";
       case "listening":
-        return liveTranscript ? "Listening…" : "Listening… speak now";
+        return liveTranscript ? "Listening — press to send now." : "Listening — speak now.";
       case "thinking":
         return "Dispatcher is thinking…";
       case "speaking":
         return "Dispatcher is speaking…";
       case "done":
-        return "Report dispatched. Tap to start a new call";
+        return "Report dispatched — press to start a new call.";
     }
   })();
 
@@ -462,357 +445,241 @@ export default function ReportPage() {
     setPhaseBoth("idle");
   };
 
+  const micState =
+    phase === "listening"
+      ? "recording"
+      : phase === "thinking"
+        ? "thinking"
+        : phase === "speaking"
+          ? "speaking"
+          : phase === "done"
+            ? "done"
+            : "ready";
+
+  const severityTone = result ? (SEVERITY_TONE[result.severity] ?? "info") : "info";
+
   return (
-    <div className={styles.page}>
-      <div className={styles.bgGlow} />
-
-      <div className={`container ${styles.content}`}>
-        {/* Header */}
-        <motion.div
-          className={styles.header}
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-        >
-          <h1 className={styles.title}>Report Emergency</h1>
-          <p className={styles.subtitle}>
-            A live voice call with our AI dispatcher. Just speak naturally —
-            it will ask what happened, where, and who needs help, then
-            dispatch the right force.
+    <div className="flex w-full flex-1 flex-col">
+      <main className="mx-auto flex w-full max-w-[42rem] flex-1 flex-col px-4 pb-20 pt-2 sm:px-6">
+        <header className="flex flex-col items-center text-center">
+          <h1 className="text-pretty font-display text-[2.4rem] font-normal leading-[1.15] tracking-[-0.03em]">
+            File a report
+          </h1>
+          <p className="mt-3 max-w-[30rem] text-pretty text-[14px] leading-6 text-muted">
+            A live call with the dispatcher. Speak naturally — it listens for
+            what happened, where, and who needs help, then files and dispatches
+            the report.
           </p>
-        </motion.div>
+        </header>
 
-        {/* Language Selector */}
-        <motion.div
-          className={styles.langSelector}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.2 }}
-        >
+        {/* Mic zone */}
+        <div className="mt-9 flex flex-col items-center gap-3.5">
           <button
-            className={styles.langButton}
-            onClick={() => setLangOpen(!langOpen)}
+            type="button"
+            data-state={micState}
+            onClick={
+              phase === "idle"
+                ? startCall
+                : phase === "listening"
+                  ? endUtterance // manual send
+                  : phase === "done"
+                    ? resetReport
+                    : undefined
+            }
+            className="mic-btn size-[6.25rem]"
+            aria-label={statusLabel || undefined}
           >
-            <Languages size={16} />
-            <span>
-              {language.flag} {language.label}
-            </span>
-            <ChevronDown
-              size={14}
-              style={{
-                transform: langOpen ? "rotate(180deg)" : "none",
-                transition: "0.2s",
-              }}
-            />
-          </button>
-          <AnimatePresence>
-            {langOpen && (
-              <motion.div
-                className={styles.langDropdown}
-                initial={{ opacity: 0, y: -8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-              >
-                {languages.map((lang) => (
-                  <button
-                    key={lang.code}
-                    className={`${styles.langOption} ${language.code === lang.code ? styles.langActive : ""}`}
-                    onClick={() => {
-                      setLanguage(lang);
-                      setLangOpen(false);
-                    }}
-                  >
-                    <span>{lang.flag}</span>
-                    <span>{lang.label}</span>
-                  </button>
-                ))}
-              </motion.div>
+            {inCall ? (
+              <>
+                <span className="mic-ring" />
+                <span className="mic-ring mic-ring-2" />
+              </>
+            ) : null}
+
+            {phase === "idle" ? (
+              <Mic className="size-7" strokeWidth={1.75} />
+            ) : phase === "listening" ? (
+              <Square className="size-6" strokeWidth={1.75} />
+            ) : phase === "thinking" ? (
+              <span className="mic-spinner" />
+            ) : phase === "speaking" ? (
+              <AudioLines className="size-7 animate-pulse" strokeWidth={1.75} />
+            ) : (
+              <Check className="size-7" strokeWidth={1.75} />
             )}
-          </AnimatePresence>
-        </motion.div>
+          </button>
 
-        {/* Main Area */}
-        <div className={styles.mainArea}>
-          {/* The Agent Orb */}
-          <motion.div
-            className={styles.micContainer}
-            initial={{ opacity: 0, scale: 0.5 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.3, type: "spring", stiffness: 200, damping: 15 }}
-          >
-            <motion.button
-              className={`${styles.micButton} ${phase === "listening" ? styles.recording : ""} ${phase === "speaking" ? styles.agentSpeaking : ""}`}
-              onClick={() => {
-                if (phase === "idle") startCall();
-                else if (phase === "listening") endUtterance(); // manual send
-                else if (phase === "done") resetReport();
-              }}
-              whileTap={{ scale: 0.9 }}
-              whileHover={{ scale: 1.08, boxShadow: "0 0 60px var(--accent-red-glow)" }}
-              transition={{ type: "spring", stiffness: 300 }}
-              aria-label={statusLabel || undefined}
+          <p className="text-[13px] text-muted" aria-live="polite">
+            {statusLabel}
+          </p>
+
+          {inCall ? (
+            <button
+              type="button"
+              onClick={endCall}
+              className="inline-flex items-center gap-1.5 text-[12px] text-muted underline decoration-line-strong decoration-1 underline-offset-4 transition-colors hover:text-critical hover:decoration-critical"
             >
-              {(phase === "listening" || phase === "thinking" || phase === "speaking") && (
-                <>
-                  <span className={styles.micRing1} />
-                  <span className={styles.micRing2} />
-                  <span className={styles.micRing3} />
-                </>
-              )}
-              {phase === "idle" ? (
-                <Mic size={36} />
-              ) : phase === "done" ? (
-                <motion.div
-                  initial={{ scale: 0, rotate: -180 }}
-                  animate={{ scale: 1, rotate: 0 }}
-                  transition={{ type: "spring", stiffness: 200 }}
-                >
-                  <CheckCircle2 size={36} />
-                </motion.div>
-              ) : phase === "listening" ? (
-                <motion.div
-                  animate={{ scale: [1, 1.15, 1] }}
-                  transition={{ repeat: Infinity, duration: 1 }}
-                >
-                  <Ear size={36} />
-                </motion.div>
-              ) : phase === "speaking" ? (
-                <motion.div
-                  animate={{ scale: [1, 1.12, 1] }}
-                  transition={{ repeat: Infinity, duration: 0.8 }}
-                >
-                  <Bot size={36} />
-                </motion.div>
-              ) : (
-                <Loader2 size={36} className={styles.spinning} />
-              )}
-            </motion.button>
+              <PhoneOff className="size-3.5" aria-hidden="true" />
+              End call
+            </button>
+          ) : null}
 
-            <p className={styles.micLabel}>{statusLabel}</p>
+          {error ? (
+            <p className="flex items-center gap-2 text-[13px] text-critical">
+              <span className="size-[7px] shrink-0 rounded-full bg-critical" />
+              {error}
+            </p>
+          ) : null}
+        </div>
 
-            {/* End call button */}
-            <AnimatePresence>
-              {inCall && (
-                <motion.button
-                  className={styles.endCallBtn}
-                  onClick={endCall}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                >
-                  <PhoneOff size={14} />
-                  <span>End call</span>
-                </motion.button>
-              )}
-            </AnimatePresence>
-          </motion.div>
+        {/* Voice control */}
+        <div className="mt-8 flex items-center justify-between">
+          <label className="inline-flex h-10 items-center gap-2 rounded-[9px] border border-line bg-panel pl-3 pr-2.5 text-[13px]">
+            <span className="text-muted">Voice in</span>
+            <select
+              aria-label="Speaking language"
+              value={language.code}
+              onChange={(e) =>
+                setLanguage(languages.find((item) => item.code === e.target.value) ?? languages[0])
+              }
+              disabled={inCall}
+              className="cursor-pointer appearance-none bg-transparent pr-1 text-ink outline-none disabled:cursor-default disabled:text-muted"
+            >
+              {languages.map((item) => (
+                <option key={item.code} value={item.code}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="size-3.5 shrink-0 text-muted" aria-hidden="true" />
+          </label>
 
-          {/* Voice waveform (listening + speaking) */}
-          <AnimatePresence>
-            {(phase === "listening" || phase === "speaking") && (
-              <motion.div
-                className={styles.waveform}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-              >
-                {audioLevel.map((h, i) => (
-                  <motion.div
+          <p
+            className={`inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.08em] text-muted`}
+          >
+            {inCall ? <span className="live-dot" aria-hidden="true" /> : null}
+            {phase === "listening"
+              ? "Live call · listening"
+              : phase === "thinking"
+                ? "Live call · thinking"
+                : phase === "speaking"
+                  ? "Live call · speaking"
+                  : phase === "done"
+                    ? "Call filed"
+                    : "Ready"}
+          </p>
+        </div>
+
+        {/* Live waveform */}
+        {phase === "listening" || phase === "speaking" ? (
+          <div className="mt-6 flex h-12 items-center justify-center gap-[3px]" aria-hidden="true">
+            {audioLevel.map((level, i) => (
+              <span key={i} className="wave-bar" style={{ height: `${level}px` }} />
+            ))}
+          </div>
+        ) : null}
+
+        {/* Live caption — the single line of conversation */}
+        <section aria-label="Live call" className="mt-6">
+          {phase === "idle" && !error ? (
+            <p className="heard mx-auto max-w-[34rem] text-center text-[15.5px] italic leading-7 text-muted">
+              The call appears here while you speak — your words, then its reply.
+            </p>
+          ) : phase === "listening" ? (
+            <div className="grid grid-cols-[5.25rem_minmax(0,1fr)] gap-x-4 border-y border-line py-4">
+              <span className="pt-[3px] text-[11px] uppercase tracking-[0.08em] text-muted">
+                Caller
+              </span>
+              <p className="text-pretty text-[14.5px] leading-6 text-ink/90">
+                {liveTranscript || <span className="text-muted">…</span>}
+                <span aria-hidden="true">|</span>
+              </p>
+            </div>
+          ) : phase === "thinking" ? (
+            <div className="grid grid-cols-[5.25rem_minmax(0,1fr)] gap-x-4 border-y border-line py-4">
+              <span className="pt-[3px] text-[11px] uppercase tracking-[0.08em] text-muted">
+                Dispatcher
+              </span>
+              <span className="flex items-center gap-1.5" aria-hidden="true">
+                {[0, 1, 2].map((i) => (
+                  <span
                     key={i}
-                    className={`${styles.waveBar} ${phase === "speaking" ? styles.waveSpeaking : ""}`}
-                    animate={{
-                      height:
-                        phase === "speaking"
-                          ? `${12 + Math.random() * 26}px`
-                          : `${h}px`,
-                    }}
-                    transition={{ duration: 0.12 }}
+                    className="size-[5px] animate-pulse rounded-full bg-accent"
+                    style={{ animationDelay: `${i * 220}ms` }}
                   />
                 ))}
-              </motion.div>
-            )}
-          </AnimatePresence>
+              </span>
+            </div>
+          ) : phase === "speaking" && dispatcherCaption ? (
+            <div className="grid grid-cols-[5.25rem_minmax(0,1fr)] gap-x-4 border-y border-line py-4">
+              <span className="pt-[3px] text-[11px] uppercase tracking-[0.08em] text-muted">
+                Dispatcher
+              </span>
+              <p className="heard text-pretty text-[16px] leading-[1.65]">
+                {dispatcherCaption}
+              </p>
+            </div>
+          ) : null}
+        </section>
 
-          {/* Caption — the single live line of conversation */}
-          <AnimatePresence mode="wait">
-            {(phase === "listening" || phase === "speaking") && (
-              <motion.div
-                key={phase === "listening" ? "listen" : "speak"}
-                className={`glass-card ${styles.captionCard}`}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.3 }}
-              >
-                <div className={styles.captionHeader}>
-                  {phase === "listening" ? (
-                    <>
-                      <Mic size={14} />
-                      <span>You — live transcript</span>
-                    </>
-                  ) : (
-                    <>
-                      <Bot size={14} />
-                      <span>Dispatcher — speaking</span>
-                    </>
-                  )}
-                </div>
-                <p className={styles.captionText}>
-                  {phase === "listening"
-                    ? liveTranscript || "…"
-                    : dispatcherCaption}
-                  {(phase === "listening" || phase === "speaking") && (
-                    <span className={styles.cursor}>|</span>
-                  )}
-                </p>
-              </motion.div>
-            )}
-          </AnimatePresence>
+        {/* Dispatch result */}
+        {phase === "done" && result ? (
+          <section aria-label="Dispatch result" className="mt-10">
+            <div className="flex items-baseline justify-between gap-4 border-b border-line pb-3">
+              <h2 className="font-display text-[1.6rem] font-normal leading-none tracking-[-0.015em]">
+                Dispatched
+              </h2>
+              <p className="text-[11px] uppercase tracking-[0.08em] text-muted">
+                {result.departments.length} desks notified
+              </p>
+            </div>
 
-          {/* Error Banner */}
-          <AnimatePresence>
-            {error && (
-              <motion.div
-                className={`glass-card ${styles.errorBanner}`}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-              >
-                <AlertTriangle size={20} />
-                <span>{error}</span>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Result */}
-          <AnimatePresence>
-            {phase === "done" && result && (
-              <motion.div
-                className={styles.resultArea}
-                initial={{ opacity: 0, y: 30 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-              >
-                <div className={styles.successBanner}>
-                  <CheckCircle2 size={20} />
-                  <span>
-                    Alert dispatched to {result.departments.length} departments
+            <dl className="text-[13.5px]">
+              <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-baseline gap-x-4 border-b border-line py-3">
+                <dt className="text-[11px] uppercase tracking-[0.08em] text-muted">Type</dt>
+                <dd>{result.type}</dd>
+              </div>
+              <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-baseline gap-x-4 border-b border-line py-3">
+                <dt className="text-[11px] uppercase tracking-[0.08em] text-muted">Severity</dt>
+                <dd className={`font-medium ${TONE_TEXT[severityTone]}`}>
+                  {SEVERITY_LABEL[result.severity] ?? result.severity}
+                  <span className="ml-3 font-normal text-muted tabular-nums">
+                    confidence {result.confidence}%
                   </span>
-                </div>
+                </dd>
+              </div>
+              <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-baseline gap-x-4 border-b border-line py-3">
+                <dt className="text-[11px] uppercase tracking-[0.08em] text-muted">Location</dt>
+                <dd>{result.location}</dd>
+              </div>
+              <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-baseline gap-x-4 border-b border-line py-3">
+                <dt className="text-[11px] uppercase tracking-[0.08em] text-muted">Casualties</dt>
+                <dd>{result.casualties}</dd>
+              </div>
+              <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-baseline gap-x-4 py-3">
+                <dt className="text-[11px] uppercase tracking-[0.08em] text-muted">Notified</dt>
+                <dd className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                  {result.departments.map((department) => {
+                    const tone = DEPT_TONE.get(department) ?? "info";
+                    return (
+                      <span key={department} className="inline-flex items-center gap-1.5">
+                        <span className={`size-[7px] rounded-full ${TONE_BG[tone]}`} />
+                        {department}
+                      </span>
+                    );
+                  })}
+                </dd>
+              </div>
+            </dl>
 
-                <div className={styles.resultGrid}>
-                  {/* Incident Summary */}
-                  <motion.div className={`glass-card ${styles.resultCard}`}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.1, duration: 0.4 }}
-                  >
-                    <h3 className={styles.resultCardTitle}>
-                      <AlertTriangle size={18} style={{ color: "var(--accent-amber)" }} />
-                      Incident Classification
-                    </h3>
-                    <div className={styles.resultFields}>
-                      <div className={styles.field}>
-                        <span className={styles.fieldLabel}>Type</span>
-                        <span className={styles.fieldValue}>{result.type}</span>
-                      </div>
-                      <div className={styles.field}>
-                        <span className={styles.fieldLabel}>Severity</span>
-                        <motion.span
-                          className={`badge badge-critical`}
-                          initial={{ scale: 0 }}
-                          animate={{ scale: 1 }}
-                          transition={{ delay: 0.4, type: "spring" }}
-                        >
-                          {result.severity}
-                        </motion.span>
-                      </div>
-                      <div className={styles.field}>
-                        <span className={styles.fieldLabel}>Confidence</span>
-                        <div className={styles.confidenceBar}>
-                          <motion.div
-                            className={styles.confidenceFill}
-                            initial={{ width: 0 }}
-                            animate={{ width: `${result.confidence}%` }}
-                            transition={{ delay: 0.5, duration: 1.2, ease: "easeOut" }}
-                          />
-                          <span>{result.confidence}%</span>
-                        </div>
-                      </div>
-                    </div>
-                  </motion.div>
+            <p className="heard mt-4 max-w-[64ch] text-pretty text-[16px] leading-7">
+              {result.summary}
+            </p>
+          </section>
+        ) : null}
+      </main>
 
-                  {/* Location */}
-                  <motion.div className={`glass-card ${styles.resultCard}`}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.2, duration: 0.4 }}
-                  >
-                    <h3 className={styles.resultCardTitle}>
-                      <MapPin size={18} style={{ color: "var(--accent-green)" }} />
-                      Location Reported
-                    </h3>
-                    <p className={styles.locationText}>{result.location}</p>
-                  </motion.div>
-
-                  {/* Casualties */}
-                  <motion.div className={`glass-card ${styles.resultCard}`}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.3, duration: 0.4 }}
-                  >
-                    <h3 className={styles.resultCardTitle}>
-                      <Users size={18} style={{ color: "var(--accent-red)" }} />
-                      Casualties
-                    </h3>
-                    <p className={styles.casualtyText}>{result.casualties}</p>
-                  </motion.div>
-
-                  {/* Departments */}
-                  <div className={`glass-card ${styles.resultCard} ${styles.deptCard}`}>
-                    <h3 className={styles.resultCardTitle}>
-                      <Send size={18} style={{ color: "var(--accent-blue)" }} />
-                      Departments Notified
-                    </h3>
-                    <div className={styles.deptList}>
-                      {result.departments.map((dept, i) => {
-                        const Icon = departmentIcons[dept] || Shield;
-                        const color = departmentColors[dept] || "var(--accent-blue)";
-                        return (
-                          <motion.div
-                            key={i}
-                            className={styles.deptItem}
-                            initial={{ opacity: 0, x: -20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: 0.3 + i * 0.15 }}
-                          >
-                            <div className={styles.deptIcon} style={{ background: `${color}20`, color }}>
-                              <Icon size={18} />
-                            </div>
-                            <span>{dept}</span>
-                            <CheckCircle2
-                              size={16}
-                              style={{ color: "var(--accent-green)", marginLeft: "auto" }}
-                            />
-                          </motion.div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-
-                {/* AI Summary */}
-                <div className={`glass-card ${styles.summaryCard}`}>
-                  <h3 className={styles.resultCardTitle}>
-                    AI-Generated Report Summary
-                  </h3>
-                  <p className={styles.summaryText}>{result.summary}</p>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      </div>
+      <SiteFooter apiNote="Transcription by Sarvam Saaras. Triage and replies by Amazon Bedrock." />
     </div>
   );
 }

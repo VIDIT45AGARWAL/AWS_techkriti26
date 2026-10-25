@@ -1,19 +1,10 @@
 import React from "react";
 import Link from "next/link";
-import { Flame, Shield, Heart, CloudLightning } from "lucide-react";
-import { getAgencyBySlug } from "@/lib/agencyConfig";
+import { AGENCIES, getAgencyBySlug } from "@/lib/agencyConfig";
 import AgencyTabs from "./AgencyTabs";
-import styles from "./layout.module.css";
-
-const ICONS: Record<string, React.ElementType> = {
-  Flame, Shield, Heart, CloudLightning,
-};
 
 export function generateStaticParams() {
-  const { AGENCIES } = require("@/lib/agencyConfig");
-  return AGENCIES.map((agency: any) => ({
-    agency: agency.slug,
-  }));
+  return AGENCIES.map((agency) => ({ agency: agency.slug }));
 }
 
 export default async function AgencyLayout({
@@ -28,46 +19,40 @@ export default async function AgencyLayout({
 
   if (!agency) {
     return (
-      <div style={{ padding: "120px 24px", textAlign: "center", color: "var(--text-muted)" }}>
-        <h2>Agency not found</h2>
-        <Link href="/agencies" style={{ color: "var(--accent-blue)" }}>← Back to Agencies</Link>
-      </div>
+      <main className="flex flex-1 flex-col items-center justify-center px-6 py-24 text-center">
+        <h1 className="font-display text-2xl tracking-[-0.01em]">Desk not found</h1>
+        <p className="mt-3 text-[13px] text-muted leading-6">
+          This desk does not exist.
+        </p>
+        <Link
+          href="/agencies"
+          className="mt-5 text-[13px] text-accent underline underline-offset-4"
+        >
+          All agencies
+        </Link>
+      </main>
     );
   }
 
-  const Icon = ICONS[agency.icon];
-
   return (
-    <div className={styles.wrapper}>
-      {/* Agency Header Bar */}
-      <div className={styles.agencyBar} style={{ borderBottomColor: `rgba(${agency.colorRgb}, 0.3)` }}>
-        <div className={`container ${styles.agencyBarInner}`}>
-          <Link href="/agencies" className={styles.backLink}>
-            ← Agencies
-          </Link>
-
-          <div className={styles.agencyMeta}>
-            <div
-              className={styles.agencyIcon}
-              style={{ background: `rgba(${agency.colorRgb}, 0.15)`, color: agency.color }}
-            >
-              <Icon size={20} />
-            </div>
-            <div>
-              <div className={styles.agencyName} style={{ color: agency.color }}>
-                {agency.label}
-              </div>
-              <div className={styles.agencyDesc}>{agency.description}</div>
-            </div>
-          </div>
-
-          {/* Tabs (Client Component for active state detection) */}
+    <div className="flex w-full flex-1 flex-col">
+      {/* Quiet desk bar */}
+      <div className="px-4 sm:px-6 lg:px-10 xl:px-14">
+        <nav
+          aria-label="Desk views"
+          className="flex flex-wrap items-baseline justify-between gap-x-8 gap-y-3 border-b border-line pb-0 pt-1"
+        >
+          <h1 className="font-display text-[1.9rem] font-normal leading-none tracking-[-0.02em]">
+            {agency.label}
+          </h1>
           <AgencyTabs agency={agency} />
-        </div>
+        </nav>
+        <p className="mt-3 max-w-[60ch] text-[13px] leading-6 text-muted">
+          {agency.description}
+        </p>
       </div>
 
-      {/* Page Content */}
-      <div className={styles.pageContent}>{children}</div>
+      {children}
     </div>
   );
 }

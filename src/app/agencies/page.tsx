@@ -2,92 +2,52 @@
 
 import React from "react";
 import Link from "next/link";
-import { motion } from "framer-motion";
-import { Flame, Shield, Heart, CloudLightning, ArrowRight, Siren } from "lucide-react";
-import { AGENCIES } from "@/lib/agencyConfig";
-import styles from "./agencies.module.css";
 
-const ICONS: Record<string, React.ElementType> = {
-  Flame,
-  Shield,
-  Heart,
-  CloudLightning,
-};
+import { SiteFooter } from "@/components/site-footer";
+import { AGENCIES } from "@/lib/agencyConfig";
+import { TONE_BG } from "@/lib/tone";
 
 export default function AgenciesPage() {
   return (
-    <div className={styles.page}>
-      <div className={`container ${styles.content}`}>
-        {/* Header */}
-        <motion.div
-          className={styles.header}
-          initial={{ opacity: 0, y: 24 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-        >
-          <div className={styles.headerIcon}>
-            <Siren size={32} />
-          </div>
-          <h1 className={styles.title}>Agency Portals</h1>
-          <p className={styles.subtitle}>
-            Select your emergency agency to access your dedicated dashboard and analytics,
-            filtered to show only incidents assigned to your department.
+    <div className="flex w-full flex-1 flex-col">
+      <main className="mx-auto flex w-full max-w-[44rem] flex-1 flex-col px-4 pb-16 pt-2 sm:px-6 lg:px-10 xl:px-14">
+        <header className="flex flex-col items-center text-center">
+          <h1 className="text-pretty font-display text-[2.4rem] font-normal leading-[1.15] tracking-[-0.03em]">
+            Agency desks
+          </h1>
+          <p className="mt-3 max-w-[30rem] text-pretty text-[14px] leading-6 text-muted">
+            Each desk sees only the reports dispatched to it, with the caller
+            conversation attached to every entry.
           </p>
-        </motion.div>
+        </header>
 
-        {/* Agency Cards Grid */}
-        <div className={styles.grid}>
-          {AGENCIES.map((agency, i) => {
-            const Icon = ICONS[agency.icon];
-            return (
-              <motion.div
-                key={agency.slug}
-                initial={{ opacity: 0, y: 30, scale: 0.96 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                transition={{ delay: i * 0.1, duration: 0.5, type: "spring", stiffness: 180, damping: 18 }}
-                whileHover={{ y: -6, scale: 1.02 }}
+        <ol className="mt-10 list-none">
+          {AGENCIES.map((agency) => (
+            <li key={agency.slug} className="border-b border-line last:border-b-0">
+              <Link
+                href={`/agencies/${agency.slug}/dashboard`}
+                className="group block py-6 first:pt-1"
               >
-                <Link href={`/agencies/${agency.slug}/dashboard`} className={styles.card}>
-                  <div
-                    className={styles.cardGlow}
-                    style={{ background: agency.gradient, opacity: 0.15 }}
-                  />
-                  <div
-                    className={styles.cardIcon}
-                    style={{ background: `rgba(${agency.colorRgb}, 0.15)`, color: agency.color }}
-                  >
-                    <Icon size={36} />
-                  </div>
-                  <div className={styles.cardBody}>
-                    <h2 className={styles.cardTitle} style={{ color: agency.color }}>
-                      {agency.label}
-                    </h2>
-                    <p className={styles.cardDesc}>{agency.description}</p>
-                    <div className={styles.cardTags}>
-                      {agency.incidentTypes.slice(0, 3).map((t) => (
-                        <span
-                          key={t}
-                          className={styles.tag}
-                          style={{
-                            background: `rgba(${agency.colorRgb}, 0.12)`,
-                            color: agency.color,
-                            borderColor: `rgba(${agency.colorRgb}, 0.25)`,
-                          }}
-                        >
-                          {t}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  <div className={styles.cardArrow} style={{ color: agency.color }}>
-                    <ArrowRight size={20} />
-                  </div>
-                </Link>
-              </motion.div>
-            );
-          })}
-        </div>
-      </div>
+                <div className="flex items-baseline justify-between gap-x-6">
+                  <h2 className="max-w-[32rem] text-pretty font-display text-[1.6rem] font-normal leading-[1.2] tracking-[-0.015em] transition-colors group-hover:text-accent">
+                    {agency.label}
+                  </h2>
+                  <span className="shrink-0 text-[13px] text-muted">Open log</span>
+                </div>
+                <p className="mt-2 max-w-[70ch] text-[13px] leading-6 text-muted">
+                  {agency.description}
+                </p>
+                <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted">
+                  <span className={`size-[7px] rounded-full ${TONE_BG[agency.tone]}`} />
+                  {agency.incidentTypes.join(" · ")}
+                </p>
+              </Link>
+            </li>
+          ))}
+        </ol>
+      </main>
+
+      <SiteFooter />
     </div>
   );
 }
