@@ -15,31 +15,47 @@ USE_ANTHROPIC_API = os.getenv("USE_ANTHROPIC_API", "false").lower() == "true"
 CANONICAL_DEPARTMENTS = ["Police", "Fire Department", "Medical Emergency", "Disaster Response"]
 
 # Signals that REQUIRE a department to be dispatched (matched against the
-# transcript, incident type and casualty notes, case-insensitive)
+# transcript, incident type and casualty notes, case-insensitive).
+# Convention: a trailing '*' means prefix match (injur* → injured/injuries);
+# plain words are matched with word boundaries ('fire' never matches 'fired').
 _DEPT_RULES = [
     ("Fire Department", [
-        "fire", "flame", "smoke", "burn", "gas leak", "gas cylinder", "explosion",
-        "blast", "electrocut", "short circuit", "lpg", "stove", "chemical spill",
-        "toxic spill", "hazardous spill", "आग", "धुआं", "आग लगी",
+        "fire", "flame*", "smoke", "burn*", "gas leak*", "gas cylinder*",
+        "explosion", "blast*", "electrocut*", "short circuit*", "lpg", "stove",
+        "chemical spill*", "toxic spill*", "hazardous spill*", "आग", "धुआं", "आग लगी",
     ]),
     ("Medical Emergency", [
-        "injur", "trapped", "unconscious", "faint", "bleed", "heart attack",
-        "stroke", "chok", "casualt", "wound", "fracture", "died", "dead", "death",
-        "ambulance", "hospital", "suffocat", "difficulty breathing", "collapsed man",
-        "collapsed woman", "collapsed person", "pregnan",
+        "injur*", "trapped", "unconscious*", "faint*", "bleed*", "burn*",
+        "heart attack*", "stroke", "chok*", "casualt*", "wound*", "fracture*",
+        "died", "dead", "death", "ambulance*", "hospital*", "suffocat*",
+        "difficulty breathing", "collapsed man*", "collapsed woman*",
+        "collapsed person*", "pregnan*",
     ]),
     ("Police", [
-        "theft", "robber", "steal", "stabbing", "shooting", "assault", "violence",
-        "riot", "accident", "crash", "collision", "kidnap", "murder", "suspicious",
-        "weapon", "crime", "fight", "drunk driving", "hit and run", "traffic",
+        "theft", "robber*", "steal*", "stealing", "stabbing*", "shooting*",
+        "assault*", "violence", "riot*", "accident*", "crash*", "collision*",
+        "kidnap*", "murder*", "suspicious", "weapon*", "crime*", "fight*",
+        "drunk driving", "hit and run", "traffic hazard*",
     ]),
     ("Disaster Response", [
-        "flood", "earthquake", "cyclone", "landslide", "tsunami", "evacuat",
-        "chemical spill", "chemical leak", "hazard", "biohazard", "building collapse",
-        "structure collapse", "bridge collapse", "dam", "disaster", "storm surge",
-        "बाढ़", "भूकंप", "gas leak into",
+        "flood*", "earthquake*", "cyclone*", "landslide*", "tsunami*", "evacuat*",
+        "chemical spill*", "chemical leak*", "biohazard", "building collapse*",
+        "structure collapse*", "bridge collapse*", "dam burst", "disaster*",
+        "storm surge", "बाढ़", "भूकंप", "gas leak into",
     ]),
 ]
+
+
+def _has_signal(keywords: list, text: str) -> bool:
+    """True if any keyword/prefix appears in text (word-boundary aware)."""
+    for k in keywords:
+        if k.endswith("*"):
+            pattern = rf"\b{re.escape(k[:-1])}"
+        else:
+            pattern = rf"\b{re.escape(k)}\b"
+        if re.search(pattern, text or ""):
+            return True
+    return False
 
 
 def _normalize_department(name: str) -> str | None:
@@ -81,7 +97,7 @@ def _enforce_department_rules(analysis: dict, transcript: str) -> list:
     ]).lower()
 
     for dept, keywords in _DEPT_RULES:
-        if any(k in signals for k in keywords) and dept not in departments:
+        if dept not in departments and _has_signal(keywords, signals):
             departments.append(dept)
 
     # Canonical ordering, and never dispatch to nobody
@@ -122,6 +138,15 @@ async def analyze_incident(transcript: str) -> dict:
 
     # Guarantee the correct force is dispatched for the correct emergency
     analysis["departments"] = _enforce_department_rules(analysis, transcript)
+
+    # Normalize confidence: models return either 0-1 or 0-100 — UI wants 0-100
+    conf = analysis.get("confidence")
+    if isinstance(conf, (int, float)):
+        if conf <= 1.0:
+            conf *= 100
+        analysis["confidence"] = round(min(max(conf, 0.0), 100.0), 1)
+    else:
+        analysis["confidence"] = 50.0
     return analysis
 
 
@@ -169,7 +194,7 @@ Return ONLY valid JSON, no other text."""
 
 
 async def _analyze_with_bedrock(transcript: str) -> dict:
-    """Use AWS Bedrock with Claude models."""
+    """Use AWS Bedrock via the Converse API (Amazon Nova / Claude models)."""
     import boto3
 
     # Only pass explicit credentials if set; otherwise use EC2 instance profile
@@ -214,32 +239,27 @@ Return a JSON object with these exact fields:
 
 Return ONLY valid JSON, no other text."""
 
-    model_id = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-sonnet-20240229-v1:0")
-    
-    # Note: extended thinking is only supported on claude-3-7 and newer
-    # Use standard request body for claude-3-sonnet
-    request_body = {
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 1024,
-        "messages": [{"role": "user", "content": prompt}],
-    }
+    # Default to Amazon Nova Lite via the APAC inference profile — it is
+    # available on-demand to all accounts (Anthropic models require an
+    # explicit model-access grant this account does not have).
+    model_id = os.getenv("BEDROCK_MODEL_ID", "apac.amazon.nova-lite-v1:0")
 
-    response = client.invoke_model(
-        modelId=model_id,
-        body=json.dumps(request_body),
-        contentType="application/json",
-    )
+    # Run blocking Converse call in a thread; parse JSON out of the reply
+    def _invoke() -> str:
+        response = client.converse(
+            modelId=model_id,
+            messages=[{"role": "user", "content": [{"text": prompt}]}],
+            inferenceConfig={"maxTokens": 1024, "temperature": 0.2},
+        )
+        blocks = response["output"]["message"]["content"]
+        return "".join(b.get("text", "") for b in blocks if b.get("text"))
 
-    result = json.loads(response["body"].read())
-    
-    # claude-3-sonnet returns a single text block
-    response_text = ""
-    for block in result.get("content", []):
-        if block.get("type") == "text":
-            response_text = block.get("text", "")
-            break
+    loop = asyncio.get_event_loop()
+    response_text = await loop.run_in_executor(None, _invoke)
 
-    parsed = json.loads(response_text)
+    # The model may wrap JSON in markdown fences — strip them
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", response_text.strip(), flags=re.MULTILINE)
+    parsed = json.loads(cleaned)
     return parsed
 
 
@@ -270,15 +290,15 @@ async def _keyword_fallback(transcript: str) -> dict:
     """
     text = (transcript or "").lower()
 
-    if any(k in text for k in ("fire", "smoke", "burn", "gas leak", "explosion", "आग", "धुआं")):
+    if _has_signal(["fire", "smoke", "burn*", "gas leak*", "explosion", "आग", "धुआं"], text):
         incident_type = "Fire Emergency"
-    elif any(k in text for k in ("flood", "earthquake", "cyclone", "landslide", "बाढ़", "भूकंप")):
+    elif _has_signal(["flood*", "earthquake*", "cyclone*", "landslide*", "बाढ़", "भूकंप"], text):
         incident_type = "Natural Disaster"
-    elif any(k in text for k in ("accident", "crash", "collision")):
+    elif _has_signal(["accident*", "crash*", "collision*"], text):
         incident_type = "Road Accident"
-    elif any(k in text for k in ("theft", "robber", "assault", "stabbing", "shooting")):
+    elif _has_signal(["theft", "robber*", "assault*", "stabbing*", "shooting*"], text):
         incident_type = "Crime Report"
-    elif any(k in text for k in ("injur", "unconscious", "bleed", "faint", "heart attack")):
+    elif _has_signal(["injur*", "unconscious*", "bleed*", "faint*", "heart attack*"], text):
         incident_type = "Medical Emergency"
     else:
         incident_type = "General Emergency"
