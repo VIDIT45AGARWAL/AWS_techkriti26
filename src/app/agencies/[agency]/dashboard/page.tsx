@@ -88,12 +88,17 @@ export default function AgencyDashboardPage({
   const respondingCount = incidents.filter((i) => i.status === "responding").length;
   const resolvedCount = incidents.filter((i) => i.status === "resolved").length;
 
-  const pins: MapIncident[] = filtered.map((inc) => ({
+  // Only incidents the caller actually located get a pin — no fake
+  // center-of-India markers for unknown locations.
+  const pinned = filtered.filter(
+    (inc) => typeof inc.coordinates?.lat === "number" && typeof inc.coordinates?.lng === "number"
+  );
+  const pins: MapIncident[] = pinned.map((inc) => ({
     id: inc.id,
     type: inc.type,
     severity: inc.severity,
     location: inc.location,
-    coords: [inc.coordinates?.lat ?? 22.5, inc.coordinates?.lng ?? 78.9] as [number, number],
+    coords: [inc.coordinates!.lat, inc.coordinates!.lng] as [number, number],
     status: inc.status,
     summary: inc.summary,
     casualties: inc.casualties,

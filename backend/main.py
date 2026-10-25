@@ -17,6 +17,7 @@ from services.sarvam import transcribe_audio, transcribe_audio_streaming, synthe
 from services.bedrock import analyze_incident
 from services.conversation import converse
 from services.sns import dispatch_alerts
+from services.location import geocode
 from services.dynamodb import (
     put_incident as db_put,
     get_incidents as db_get_all,
@@ -64,7 +65,8 @@ class Incident(BaseModel):
     type: str
     severity: str
     departments: List[str]
-    location: str                         # as described by the caller (no geolocation)
+    location: str                         # as described by the caller (no browser geolocation)
+    coordinates: Optional[Coordinates] = None  # geocoded from the spoken location, for the ops map
     casualties: str
     summary: str
     transcript: str
@@ -76,6 +78,23 @@ class Incident(BaseModel):
 
 
 # ─── Routes ───
+
+async def _coords_from_spoken_location(location_text: Optional[str]) -> Optional[Coordinates]:
+    """
+    Geocode the location exactly as the caller spoke it (server-side AWS
+    Location, restricted to India). No browser geolocation anywhere —
+    coordinates exist only when the caller actually said where it happened.
+    """
+    text = (location_text or "").strip()
+    if not text:
+        return None
+    try:
+        geocoded = await geocode(text)
+        if geocoded:
+            return Coordinates(lat=geocoded[0], lng=geocoded[1])
+    except Exception as e:
+        print(f"[GEOCODE] failed for {text!r}: {e}")
+    return None
 
 @app.get("/")
 def root():
@@ -105,8 +124,9 @@ async def report_incident(report: IncidentReport):
     # Step 1: Analyze with Bedrock
     analysis = await analyze_incident(transcript)
 
-    # Step 2: Location is whatever the caller described — no geolocation
+    # Step 2: Location is whatever the caller described — no browser geolocation
     location = (analysis.get("location_extracted") or "").strip() or "Unknown location"
+    coords = await _coords_from_spoken_location(analysis.get("location_extracted"))
 
     # Step 3: Build incident
     incident_id = f"INC-{str(uuid.uuid4())[:8].upper()}"
@@ -116,6 +136,7 @@ async def report_incident(report: IncidentReport):
         severity=analysis["severity"],
         departments=analysis["departments"],
         location=location,
+        coordinates=coords,
         casualties=analysis["casualties"],
         summary=analysis["summary"],
         transcript=transcript,
@@ -177,13 +198,17 @@ async def converse_with_dispatcher(req: ConverseRequest):
         analysis = result["analysis"]
         history.append({"role": "assistant", "text": reply})
 
+        spoken_location = (analysis.get("location_extracted") or "").strip()
+        coords = await _coords_from_spoken_location(spoken_location)
+
         incident_id = f"INC-{str(uuid.uuid4())[:8].upper()}"
         incident = Incident(
             id=incident_id,
             type=analysis.get("incident_type") or "General Emergency",
             severity=analysis.get("severity") or "medium",
             departments=analysis.get("departments") or ["Police"],
-            location=(analysis.get("location_extracted") or "").strip() or "Unknown location",
+            location=spoken_location or "Unknown location",
+            coordinates=coords,
             casualties=analysis.get("casualties") or "Unknown",
             summary=analysis.get("summary") or req.transcript[:500],
             transcript=req.transcript,

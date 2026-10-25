@@ -112,10 +112,14 @@ export function IncidentRow({
             </span>
             <span className="text-[11px] uppercase tracking-[0.08em] text-muted">Location</span>
             <span>
-              {incident.location}{" "}
-              <span className="text-muted tabular-nums">
-                ({incident.coordinates?.lat?.toFixed(4)}°, {incident.coordinates?.lng?.toFixed(4)}°)
-              </span>
+              {incident.location}
+              {typeof incident.coordinates?.lat === "number" &&
+              typeof incident.coordinates?.lng === "number" ? (
+                <span className="text-muted tabular-nums">
+                  {" "}
+                  ({incident.coordinates.lat.toFixed(4)}°, {incident.coordinates.lng.toFixed(4)}°)
+                </span>
+              ) : null}
             </span>
           </div>
         </div>
